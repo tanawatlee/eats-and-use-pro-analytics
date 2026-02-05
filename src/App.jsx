@@ -27,7 +27,10 @@ import {
   AlertTriangle,
   Loader2,
   Maximize2, 
-  Minimize2  
+  Minimize2,
+  BadgePercent,
+  Landmark,
+  Container
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -43,7 +46,6 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-// แก้ไข: ใช้ initializeFirestore พร้อม options เพื่อแก้ปัญหา Offline ใน StackBlitz
 const db = initializeFirestore(app, {
   experimentalForceLongPolling: true, 
 });
@@ -54,6 +56,29 @@ const auth = getAuth(app);
 const getThaiDate = () => {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
 };
+
+// --- Helper: Safe Date Formatter (Prevents Object Error) ---
+const safeDate = (val) => {
+  if (!val) return '-';
+  try {
+    if (typeof val === 'object' && typeof val.toDate === 'function') {
+      return val.toDate().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    }
+    if (val instanceof Date) {
+        return val.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+    }
+    return String(val);
+  } catch (e) {
+    return String(val);
+  }
+};
+
+// --- Helper: Safe String (Prevents Object Error in Rendering) ---
+const safeStr = (val) => {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'object') return JSON.stringify(val);
+    return String(val);
+}
 
 // --- Constants ---
 const FMCG_CONFIG = {
@@ -147,7 +172,7 @@ const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentApp
       <div className={`bg-[#E8E1D5] rounded-xl p-3 border border-[#D7BA9D]/30 transition-all ${isDevMode ? 'opacity-100' : 'opacity-60'}`}>
          <div className="flex items-center justify-center gap-2 text-[#433D3C] font-bold text-xs mb-1">
             <CloudCog size={14} className="text-[#B3543D]"/>
-            <span>DB: {currentAppId.slice(0,10)}...</span>
+            <span>DB: {currentAppId ? currentAppId.slice(0,10) : '...'}...</span>
          </div>
          <p className={`text-[9px] font-bold uppercase tracking-widest ${isDevMode ? 'text-red-500' : 'text-[#606C38]'}`}>
             {isDevMode ? 'Connected to Dev' : 'Connected to Prod'}
@@ -161,11 +186,13 @@ const ContactPickerModal = ({ isOpen, onClose, contacts, type, onSelect }) => {
   const [search, setSearch] = useState('');
   
   const filtered = useMemo(() => {
+    // Safety check for contacts
+    if (!contacts) return [];
     const list = contacts.filter(c => c.type === type);
     if (!search) return list;
     return list.filter(c => 
-      c.name.toLowerCase().includes(search.toLowerCase()) || 
-      (c.taxId && c.taxId.includes(search))
+      (c.name || '').toLowerCase().includes(search.toLowerCase()) || 
+      (c.taxId && String(c.taxId).includes(search))
     );
   }, [contacts, type, search]);
 
@@ -186,9 +213,9 @@ const ContactPickerModal = ({ isOpen, onClose, contacts, type, onSelect }) => {
           />
         </div>
         <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar text-left">
-          {filtered.length === 0 ? (
+          {filtered?.length === 0 ? (
             <p className="text-center text-[#8B8A73] text-xs py-10 italic">ไม่พบข้อมูลผู้ติดต่อ</p>
-          ) : filtered.map(c => (
+          ) : filtered?.map(c => (
             <div 
               key={c.id} 
               onClick={() => { onSelect(c); onClose(); }}
@@ -199,8 +226,8 @@ const ContactPickerModal = ({ isOpen, onClose, contacts, type, onSelect }) => {
                   {type === 'customer' ? <Users size={18}/> : <Truck size={18}/>}
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-[#433D3C]">{c.name}</p>
-                  <p className="text-[10px] text-[#8B8A73] font-mono">Tax ID: {c.taxId || '-'} | สาขา: {c.branch}</p>
+                  <p className="text-sm font-bold text-[#433D3C]">{safeStr(c.name)}</p>
+                  <p className="text-[10px] text-[#8B8A73] font-mono">Tax ID: {safeStr(c.taxId) || '-'} | สาขา: {safeStr(c.branch)}</p>
                 </div>
               </div>
               <ChevronRight className="text-[#D7BA9D] group-hover:text-[#B3543D]" size={16} />
@@ -268,10 +295,10 @@ const App = () => {
   
   // Checkout States
   const [salesChannel, setSalesChannel] = useState('Offline');
-  const [manualFeeAmount, setManualFeeAmount] = useState(0); 
-  const [shippingIncome, setShippingIncome] = useState(0); 
-  const [actualShippingCost, setActualShippingCost] = useState(0); 
-  const [discountAmount, setDiscountAmount] = useState(0); 
+  const [manualFeeAmount, setManualFeeAmount] = useState(''); 
+  const [shippingIncome, setShippingIncome] = useState(''); 
+  const [actualShippingCost, setActualShippingCost] = useState(''); 
+  const [discountAmount, setDiscountAmount] = useState(''); 
   const [useVat, setUseVat] = useState(true);
   const [isFullTax, setIsFullTax] = useState(false);
   const [customerInfo, setCustomerInfo] = useState({ name: '', taxId: '', branch: '00000', address: '' });
@@ -287,19 +314,24 @@ const App = () => {
     productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: getThaiDate(),
     vendor: '', taxId: '', branch: '00000', includeVat: true, contactId: ''
   });
+  
+  // *** FIXED: Re-added missing state definition ***
+  const [stockItemInput, setStockItemInput] = useState({ productId: '', qty: '', cost: '' });
+  
   const [newContact, setNewContact] = useState({ name: '', taxId: '', branch: '00000', email: '', phone: '', address: '', type: 'customer' });
 
   // --- Derived Calculations ---
   const derivedValues = useMemo(() => {
-    const currentSubtotal = cart.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0);
+    const currentSubtotal = cart?.reduce((sum, item) => sum + (Number(item.price) * Number(item.qty)), 0) || 0;
     const currentVatValue = useVat ? (currentSubtotal - Number(discountAmount)) * 0.07 : 0;
     const currentFinalReceive = currentSubtotal + Number(shippingIncome) - Number(discountAmount) - Number(manualFeeAmount) + (useVat ? currentVatValue : 0);
     return { subtotal: currentSubtotal, vatValue: currentVatValue, finalReceive: currentFinalReceive };
   }, [cart, useVat, discountAmount, shippingIncome, manualFeeAmount]);
 
   const productInventorySummary = useMemo(() => {
+    if (!products) return [];
     return products.map((product, index) => {
-      const productLots = lots.filter(l => l.productId === product.id);
+      const productLots = lots?.filter(l => l.productId === product.id) || [];
       const totalIn = productLots.reduce((sum, l) => sum + (Number(l.initialQty) || 0), 0);
       const remaining = productLots.reduce((sum, l) => sum + (Number(l.remainingQty) || 0), 0);
       const used = totalIn - remaining;
@@ -308,8 +340,8 @@ const App = () => {
     });
   }, [products, lots]);
 
-  const salesTaxReport = useMemo(() => transactions.filter(t => t.type === 'income' && (Number(t.vat) || 0) > 0), [transactions]);
-  const purchaseTaxReport = useMemo(() => transactions.filter(t => t.type === 'expense' && (Number(t.vat) || 0) > 0), [transactions]);
+  const salesTaxReport = useMemo(() => transactions?.filter(t => t.type === 'income' && (Number(t.vat) || 0) > 0) || [], [transactions]);
+  const purchaseTaxReport = useMemo(() => transactions?.filter(t => t.type === 'expense' && (Number(t.vat) || 0) > 0) || [], [transactions]);
 
   const taxSummary = useMemo(() => {
     const totalOutput = salesTaxReport.reduce((sum, t) => sum + (Number(t.vat) || 0), 0);
@@ -318,12 +350,14 @@ const App = () => {
   }, [salesTaxReport, purchaseTaxReport]);
 
   const accSummary = useMemo(() => {
+    if (!transactions) return { income: 0, expense: 0, balance: 0 };
     const income = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + Number(t.amount || 0) + Number(t.shippingIncome || 0) - Number(t.discount || 0), 0);
     const expense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + Number(t.amount || 0), 0);
     return { income, expense, balance: income - expense };
   }, [transactions]);
 
   const analyticsData = useMemo(() => {
+    if (!transactions) return { byChannel: {}, topSelling: [], itemizedSalesLog: [] };
     const sales = transactions.filter(t => t.type === 'income');
     const byChannel = sales.reduce((acc, t) => { acc[t.channel] = (acc[t.channel] || 0) + (t.amount || 0); return acc; }, {});
     const productStats = {};
@@ -340,7 +374,10 @@ const App = () => {
     return { byChannel, topSelling, itemizedSalesLog };
   }, [transactions]);
 
-  const sortedCategories = useMemo(() => [...new Set(products.map(p => p.category))].sort(), [products]);
+  const sortedCategories = useMemo(() => {
+    if (!products) return [];
+    return [...new Set(products.map(p => p.category))].sort();
+  }, [products]);
 
   // --- Functions ---
   const getProductStockInfo = (productId) => {
@@ -382,23 +419,78 @@ const App = () => {
     } catch (err) { console.error(err); }
   };
 
+  // NEW: Add item to stock bill list
+  const handleAddStockItem = () => {
+    if (!stockItemInput.productId || !stockItemInput.qty || !stockItemInput.cost) return;
+    const prod = products.find(p => p.id === stockItemInput.productId);
+    if (!prod) return;
+    setNewStock(prev => ({
+      ...prev,
+      items: [...(prev.items || []), { ...stockItemInput, name: prod.name, qty: Number(stockItemInput.qty), cost: Number(stockItemInput.cost) }]
+    }));
+    setStockItemInput({ productId: '', qty: '', cost: '' }); // Reset input
+  };
+
+  // NEW: Remove item from stock bill list
+  const handleRemoveStockItem = (index) => {
+    setNewStock(prev => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== index)
+    }));
+  };
+
+  // UPDATED: Submit entire stock bill
   const handleReceiveStock = async (e) => {
     e.preventDefault();
-    if (!user || !newStock.productId) return;
+    if (!user || newStock.items?.length === 0) return;
     try {
-      const purchaseVat = newStock.includeVat ? (Number(newStock.qty) * Number(newStock.cost)) * 0.07 : 0;
       const lotColl = collection(db, 'artifacts', appId, 'public', 'data', 'lots');
       const transColl = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
-      await addDoc(lotColl, { 
-        ...newStock, initialQty: Number(newStock.qty), remainingQty: Number(newStock.qty), cost: Number(newStock.cost) 
-      });
+
+      // Calculate totals
+      const totalCost = newStock.items.reduce((sum, item) => sum + (item.qty * item.cost), 0);
+      const grandTotal = Math.max(0, totalCost - Number(newStock.discount));
+      const vatAmount = newStock.includeVat ? grandTotal * 0.07 : 0;
+      
+      // 1. Create Transaction (One per bill)
       await addDoc(transColl, {
-        date: newStock.receiveDate, type: 'expense', category: 'ซื้อสินค้าเข้าสต็อก', channel: 'Internal',
-        amount: Number(newStock.qty) * Number(newStock.cost), fee: 0, vat: purchaseVat, customer: newStock.vendor || 'ไม่ระบุชื่อ',
-        taxId: newStock.taxId || '-', branch: newStock.branch || '00000', taxType: 'เต็มรูปแบบ', desc: `รับเข้าล็อต ${newStock.lotNo}`
+        date: newStock.receiveDate, 
+        type: 'expense', 
+        category: 'ซื้อสินค้าเข้าสต็อก', 
+        channel: 'Internal',
+        amount: grandTotal, // Net amount after discount
+        fee: 0, 
+        vat: vatAmount, 
+        customer: newStock.vendor || 'ไม่ระบุชื่อ',
+        taxId: newStock.taxId || '-', 
+        branch: newStock.branch || '00000', 
+        taxType: 'เต็มรูปแบบ', 
+        desc: `รับเข้าล็อต ${newStock.lotNo} (ส่วนลด ${newStock.discount} บาท)`,
+        items: newStock.items // Store detail for reference
       });
+
+      // 2. Create Lots (One per item)
+      for (const item of newStock.items) {
+          await addDoc(lotColl, { 
+            productId: item.productId,
+            cost: item.cost,
+            initialQty: item.qty,
+            remainingQty: item.qty,
+            lotNo: newStock.lotNo,
+            receiveDate: newStock.receiveDate,
+            vendor: newStock.vendor,
+            taxId: newStock.taxId,
+            branch: newStock.branch
+          });
+      }
+
       setStockModalOpen(false);
-      setNewStock({ productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: getThaiDate(), vendor: '', taxId: '', branch: '00000', includeVat: true, contactId: '' });
+      // Reset form but keep date
+      setNewStock({ 
+        lotNo: '', receiveDate: getThaiDate(), 
+        vendor: '', taxId: '', branch: '00000', contactId: '',
+        includeVat: true, items: [], discount: 0 
+      });
     } catch (err) { console.error(err); }
   };
 
@@ -436,7 +528,7 @@ const App = () => {
         taxType: isFullTax ? 'เต็มรูปแบบ' : 'แบบย่อ', desc: `ขายผ่าน ${salesChannel}`,
         items: cart.map(i => ({ name: i.name, qty: i.qty, price: i.price, category: i.category }))
       });
-      setCart([]); setShippingIncome(0); setActualShippingCost(0); setDiscountAmount(0); setManualFeeAmount(0); setIsFullTax(false);
+      setCart([]); setShippingIncome(''); setActualShippingCost(''); setDiscountAmount(''); setManualFeeAmount(''); setIsFullTax(false);
       alert(`บันทึกเรียบร้อย (ID: ${receiptId})`);
     } catch (err) { console.error(err); }
   };
@@ -534,7 +626,11 @@ const App = () => {
     
     // FIX: Switched to onSnapshot for Real-time Shop Info updates
     const unsubShop = onSnapshot(shopDocRef, 
-        (snap) => { if (snap.exists()) setShopInfo(snap.data()); },
+        (snap) => { 
+            if (snap.exists()) {
+                setShopInfo(prev => ({...prev, ...snap.data()})); 
+            }
+        },
         (err) => console.warn("Shop info snapshot error:", err)
     );
     
@@ -548,7 +644,11 @@ const App = () => {
       }
     );
     const unsubLots = onSnapshot(publicPath('lots'), 
-      (snap) => setLots(snap.docs.map(d => ({ ...d.data(), id: d.id }))), 
+      (snap) => {
+          // Sort lots by receiveDate desc for display
+          const sorted = snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a,b) => new Date(b.receiveDate || 0) - new Date(a.receiveDate || 0));
+          setLots(sorted);
+      }, 
       (err) => console.error("Lots snapshot error:", err)
     );
     const unsubContacts = onSnapshot(publicPath('contacts'), 
@@ -576,6 +676,19 @@ const App = () => {
       setNewProduct(prev => ({ ...prev, sku: `${prefix}-${formattedCount}-${timestamp}`, subCategory: config ? config.sub[0] : '' }));
     }
   }, [newProduct.category, isProductModalOpen, products.length]);
+  
+  // NEW: Generate Auto Lot Number when modal opens or bill clears
+  useEffect(() => {
+    if (isStockModalOpen && newStock.items?.length === 0 && !newStock.lotNo) {
+        const now = new Date();
+        const yy = now.getFullYear().toString().slice(-2);
+        const mm = (now.getMonth() + 1).toString().padStart(2, '0');
+        const dd = now.getDate().toString().padStart(2, '0');
+        const hh = now.getHours().toString().padStart(2, '0');
+        const min = now.getMinutes().toString().padStart(2, '0');
+        setNewStock(prev => ({ ...prev, lotNo: `REC-${yy}${mm}${dd}-${hh}${min}` }));
+    }
+  }, [isStockModalOpen, newStock.items?.length]);
 
   if (loading && user) {
     return (
@@ -638,13 +751,14 @@ const App = () => {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                  {products.filter(p => p.name.includes(searchTerm) || p.sku.includes(searchTerm)).map(product => {
+                {/* Updated Grid for Full Width */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4 md:gap-6">
+                  {products?.filter(p => (p.name || '').toString().includes(searchTerm) || (p.sku || '').toString().includes(searchTerm)).map(product => {
                     const info = getProductStockInfo(product.id);
                     return (
                       <div key={product.id} onClick={() => addToCart(product)} className={`bg-white p-5 md:p-6 rounded-3xl border border-[#D7BA9D]/20 hover:border-[#B3543D]/50 cursor-pointer transition-all ${info.totalQty === 0 ? 'opacity-50' : ''}`}>
                         <div className="w-10 h-10 bg-[#F5F0E6] rounded-xl flex items-center justify-center text-[#B3543D] mb-4"><Box size={20} /></div>
-                        <h4 className="font-bold text-sm mb-1">{product.name}</h4>
+                        <h4 className="font-bold text-sm mb-1">{safeStr(product.name)}</h4>
                         <div className="flex justify-between items-end mt-4">
                           <span className="text-lg font-bold">฿{Number(product.price).toLocaleString()}</span>
                           <span className={`text-[10px] font-bold ${info.totalQty < (product.minStock || 10) ? 'text-[#B3543D]' : 'text-[#8B8A73]'}`}>คงเหลือ: {info.totalQty}</span>
@@ -666,9 +780,9 @@ const App = () => {
                     <div className="md:hidden font-bold text-[#B3543D]">฿{derivedValues.finalReceive.toLocaleString()}</div>
                 </div>
                 <div className="flex-1 p-6 md:p-8 space-y-6 overflow-y-auto custom-scrollbar bg-white">
-                  {cart.length === 0 ? <p className="text-center text-[#8B8A73] text-xs py-10 italic">ว่าง</p> : cart.map(item => (
+                  {cart?.length === 0 ? <p className="text-center text-[#8B8A73] text-xs py-10 italic">ว่าง</p> : cart?.map(item => (
                     <div key={item.id} className="flex justify-between items-center bg-[#FDFCF8] p-3 rounded-2xl border border-[#F5F0E6] text-[#433D3C]">
-                      <div className="min-w-0 pr-2"><p className="font-bold text-xs truncate">{item.name}</p><p className="text-[10px] text-[#B3543D] font-bold">฿{Number(item.price).toLocaleString()}</p></div>
+                      <div className="min-w-0 pr-2"><p className="font-bold text-xs truncate">{safeStr(item.name)}</p><p className="text-[10px] text-[#B3543D] font-bold">฿{Number(item.price).toLocaleString()}</p></div>
                       <div className="flex items-center gap-2">
                         <button onClick={() => setCart(cart.map(c => c.id === item.id ? {...c, qty: Math.max(0, c.qty - 1)} : c).filter(c => c.qty > 0))} className="w-6 h-6 rounded-lg bg-white border border-[#D7BA9D]/30 text-xs">-</button>
                         <span className="text-xs font-bold w-4 text-center">{item.qty}</span>
@@ -677,6 +791,56 @@ const App = () => {
                     </div>
                   ))}
                   <div className="pt-6 border-t border-[#F5F0E6] space-y-4">
+                  {/* Financials & Logistics Section */}
+                    <div className="space-y-3 pt-4 border-t border-[#F5F0E6]">
+                        {/* Discount */}
+                        <div className="flex justify-between items-center gap-2">
+                            <div className="flex items-center gap-2">
+                              <BadgePercent size={16} className="text-[#B3543D]" />
+                              <span className="text-xs text-[#8B8A73]">ส่วนลด (Discount)</span>
+                            </div>
+                            <div className="flex items-center gap-1 bg-white border border-[#D7BA9D]/30 rounded-lg px-2 py-1 w-24">
+                                <span className="text-xs text-red-500">-</span>
+                                <input type="number" className="w-full text-right text-xs outline-none text-red-500 font-bold" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} placeholder="0" />
+                            </div>
+                        </div>
+
+                        {/* Only show for Online Channels or if user wants to expand */}
+                        {salesChannel !== 'Offline' && (
+                            <>
+                                <div className="flex justify-between items-center gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <Truck size={16} className="text-[#606C38]" />
+                                        <span className="text-xs text-[#8B8A73]">ค่าส่งเก็บลูกค้า (Shipping Income)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 bg-white border border-[#D7BA9D]/30 rounded-lg px-2 py-1 w-24">
+                                        <span className="text-xs text-green-600">+</span>
+                                        <input type="number" className="w-full text-right text-xs outline-none text-green-600 font-bold" value={shippingIncome} onChange={e => setShippingIncome(e.target.value)} placeholder="0" />
+                                    </div>
+                                </div>
+                                <div className="flex justify-between items-center gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <Landmark size={16} className="text-[#8B8A73]" />
+                                        <span className="text-xs text-[#8B8A73]">ค่าธรรมเนียม (Platform Fee)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 bg-white border border-[#D7BA9D]/30 rounded-lg px-2 py-1 w-24">
+                                        <span className="text-xs text-red-500">-</span>
+                                        <input type="number" className="w-full text-right text-xs outline-none text-red-500 font-bold" value={manualFeeAmount} onChange={e => setManualFeeAmount(e.target.value)} placeholder="0" />
+                                    </div>
+                                </div>
+                                <div className="flex justify-between items-center gap-2">
+                                    <div className="flex items-center gap-2 pl-6">
+                                        <Container size={14} className="text-[#8B8A73] opacity-60" />
+                                        <span className="text-[10px] text-[#8B8A73] opacity-70">ต้นทุนค่าส่งจริง (Actual Cost)</span>
+                                    </div>
+                                    <div className="flex items-center gap-1 bg-[#F5F0E6]/50 border border-transparent rounded-lg px-2 py-1 w-24">
+                                        <input type="number" className="w-full text-right text-[10px] outline-none text-[#433D3C]" placeholder="(ไม่คำนวณ)" value={actualShippingCost} onChange={e => setActualShippingCost(e.target.value)} />
+                                    </div>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                    
                     <div className="space-y-4 p-4 bg-[#FDFCF8] border border-[#D7BA9D]/20 rounded-2xl">
                         <div className="flex items-center justify-between text-[#433D3C]">
                           <div className="flex items-center gap-2"><UserCheck size={16} className={isFullTax ? 'text-[#B3543D]' : 'text-[#8B8A73]'} /><span className="text-xs font-bold">ใบกำกับภาษีเต็มรูป</span></div>
@@ -684,7 +848,7 @@ const App = () => {
                         </div>
                         {isFullTax && (
                           <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
-                             <button onClick={() => setCustomerPickerOpen(true)} className="w-full flex items-center justify-between bg-white border border-[#D7BA9D]/30 rounded-lg px-4 py-2.5 text-xs text-[#8B8A73] hover:border-[#B3543D] transition-all"><span>{customerInfo.name || "ค้นหาลูกค้า..."}</span><ChevronRight size={14}/></button>
+                             <button onClick={() => setCustomerPickerOpen(true)} className="w-full flex items-center justify-between bg-white border border-[#D7BA9D]/30 rounded-lg px-4 py-2.5 text-xs text-[#8B8A73] hover:border-[#B3543D] transition-all"><span>{safeStr(customerInfo.name) || "ค้นหาลูกค้า..."}</span><ChevronRight size={14}/></button>
                              <input type="text" placeholder="ชื่อ" className="w-full bg-white border border-[#D7BA9D]/30 rounded-lg px-3 py-2 text-[11px]" value={customerInfo.name} onChange={e => setCustomerInfo({...customerInfo, name: e.target.value})} />
                              <div className="grid grid-cols-2 gap-2">
                                 <input type="text" placeholder="Tax ID" className="w-full bg-white border border-[#D7BA9D]/30 rounded-lg px-3 py-2 text-[11px]" value={customerInfo.taxId} onChange={e => setCustomerInfo({...customerInfo, taxId: e.target.value})} />
@@ -697,19 +861,19 @@ const App = () => {
                 </div>
                 <div className="p-6 md:p-8 bg-[#F5F0E6]/50 md:rounded-b-[40px] border-t border-[#F5F0E6] space-y-4 text-[#433D3C] pb-10 md:pb-8">
                   <div className="flex justify-between text-lg font-bold"><span>ยอดรับสุทธิ</span><span className="text-[#B3543D]">฿{derivedValues.finalReceive.toLocaleString()}</span></div>
-                  <button onClick={handleCheckout} disabled={cart.length === 0} className="w-full bg-[#B3543D] text-white py-4 rounded-2xl font-bold text-sm shadow-lg hover:bg-[#963F2C] transition-all">ยืนยันการขาย</button>
+                  <button onClick={handleCheckout} disabled={cart?.length === 0} className="w-full bg-[#B3543D] text-white py-4 rounded-2xl font-bold text-sm shadow-lg hover:bg-[#963F2C] transition-all">ยืนยันการขาย</button>
                 </div>
               </div>
             </div>
           )}
-
+          {/* ... existing code for other views ... */}
           {view === 'inventory' && (
             <div className="space-y-8 w-full animate-in fade-in duration-300 text-[#433D3C]">
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                  <div>
                     <div className="flex items-center gap-3">
                        {selectedProductId && <button onClick={() => setSelectedProductId(null)} className="p-2 hover:bg-[#F5F0E6] rounded-xl text-[#B3543D] transition-colors"><ArrowLeft size={20} /></button>}
-                       <h3 className="text-xl font-bold">{selectedProductId ? `ล็อตสินค้า: ${products.find(p => p.id === selectedProductId)?.name}` : "คลังสินค้า"}</h3>
+                       <h3 className="text-xl font-bold">{selectedProductId ? `ล็อตสินค้า: ${products?.find(p => p.id === selectedProductId)?.name}` : "คลังสินค้า"}</h3>
                     </div>
                  </div>
                  <div className="flex gap-3 font-bold">
@@ -727,10 +891,10 @@ const App = () => {
                         <tr><th className="px-6 py-5">รหัสล็อต</th><th className="px-6 py-5">วันที่รับเข้า</th><th className="px-6 py-5 text-right">แรกรับ</th><th className="px-6 py-5 text-right">คงเหลือ</th></tr>
                       </thead>
                       <tbody className="divide-y divide-[#F5F0E6]">
-                        {lots.filter(l => l.productId === selectedProductId).map((lot) => (
+                        {lots?.filter(l => l.productId === selectedProductId).map((lot) => (
                           <tr key={lot.id} className="font-bold hover:bg-[#FDFCF8]">
-                            <td className="px-6 py-5 font-mono text-[#B3543D]">{lot.lotNo}</td>
-                            <td className="px-6 py-5 text-[#8B8A73]">{lot.receiveDate}</td>
+                            <td className="px-6 py-5 font-mono text-[#B3543D]">{safeStr(lot.lotNo)}</td>
+                            <td className="px-6 py-5 text-[#8B8A73]">{safeDate(lot.receiveDate)}</td>
                             <td className="px-6 py-5 text-right">{lot.initialQty}</td>
                             <td className={`px-6 py-5 text-right ${lot.remainingQty == 0 ? 'text-red-300 opacity-50' : 'text-[#606C38]'}`}>{lot.remainingQty}</td>
                           </tr>
@@ -743,7 +907,7 @@ const App = () => {
                  <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]">
                     <div className="overflow-x-auto">
                     <table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/50 border-b text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5 w-12 text-center">#</th><th className="px-6 py-5">สินค้า (คลิกเพื่อดูล็อต)</th><th className="px-6 py-5 text-right">สต็อกรวม</th><th className="px-6 py-5 text-right">มูลค่ารวม</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">
-                        {productInventorySummary.map(item => (<tr key={item.id} onClick={() => setSelectedProductId(item.id)} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C] cursor-pointer"><td className="px-6 py-5 text-center text-[#8B8A73]">{item.index}</td><td className="px-6 py-5"><div>{item.name}</div><div className="text-[9px] text-[#B3543D] font-mono">{item.sku}</div></td><td className="px-6 py-5 text-right">{item.remaining} {item.uom}</td><td className="px-6 py-5 text-right font-black">฿{item.totalValue.toLocaleString()}</td></tr>))}
+                        {productInventorySummary?.map(item => (<tr key={item.id} onClick={() => setSelectedProductId(item.id)} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C] cursor-pointer"><td className="px-6 py-5 text-center text-[#8B8A73]">{item.index}</td><td className="px-6 py-5"><div>{safeStr(item.name)}</div><div className="text-[9px] text-[#B3543D] font-mono">{safeStr(item.sku)}</div></td><td className="px-6 py-5 text-right">{item.remaining} {item.uom}</td><td className="px-6 py-5 text-right font-black">฿{item.totalValue.toLocaleString()}</td></tr>))}
                     </tbody></table>
                     </div>
                  </div>
@@ -758,7 +922,7 @@ const App = () => {
                    <div className="bg-white p-6 rounded-[32px] border border-[#D7BA9D]/20 shadow-sm"><p className="text-[10px] text-[#8B8A73] uppercase mb-1">รายจ่ายรวม</p><h4 className="text-xl text-[#B3543D]">฿{accSummary.expense.toLocaleString()}</h4></div>
                    <div className="bg-[#433D3C] text-white p-6 rounded-[32px] shadow-lg"><p className="text-[10px] opacity-70 uppercase mb-1">คงเหลือ</p><h4 className="text-xl">฿{accSummary.balance.toLocaleString()}</h4></div>
                 </div>
-                <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">รายการ</th><th className="px-6 py-5 text-right">จำนวนเงิน</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{transactions.map(t => (<tr key={t.id} className="hover:bg-[#FDFCF8] font-bold"><td className="px-6 py-5 text-[#8B8A73]">{t.date}</td><td className="px-6 py-5">{t.category} ({t.customer})</td><td className={`px-6 py-5 text-right ${t.type === 'income' ? 'text-[#606C38]' : 'text-[#B3543D]'}`}>฿{(t.amount + (t.shippingIncome || 0) - (t.discount || 0)).toLocaleString()}</td></tr>))}</tbody></table></div></div>
+                <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">รายการ</th><th className="px-6 py-5 text-right">จำนวนเงิน</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{transactions?.map(t => (<tr key={t.id} className="hover:bg-[#FDFCF8] font-bold"><td className="px-6 py-5 text-[#8B8A73]">{safeDate(t.date)}</td><td className="px-6 py-5">{safeStr(t.category)} ({safeStr(t.customer)})</td><td className={`px-6 py-5 text-right ${t.type === 'income' ? 'text-[#606C38]' : 'text-[#B3543D]'}`}>฿{(t.amount + (t.shippingIncome || 0) - (t.discount || 0)).toLocaleString()}</td></tr>))}</tbody></table></div></div>
              </div>
           )}
 
@@ -779,7 +943,7 @@ const App = () => {
                        </div>
                        {foundTransaction && (
                          <div className="bg-white/60 p-6 rounded-3xl border border-[#CCD5AE] space-y-4">
-                            <button onClick={() => setCustomerPickerOpen(true)} className="w-full flex items-center justify-between bg-white border border-[#D7BA9D]/30 rounded-xl px-4 py-2 text-xs text-[#8B8A73]"><span>{customerInfo.name || "เลือกจาก CRM..."}</span><ChevronRight size={14}/></button>
+                            <button onClick={() => setCustomerPickerOpen(true)} className="w-full flex items-center justify-between bg-white border border-[#D7BA9D]/30 rounded-xl px-4 py-2 text-xs text-[#8B8A73]"><span>{safeStr(customerInfo.name) || "เลือกจาก CRM..."}</span><ChevronRight size={14}/></button>
                             <input type="text" placeholder="ชื่อ" className="w-full bg-white border border-[#D7BA9D]/30 rounded-xl px-4 py-2 text-xs" value={customerInfo.name} onChange={e => setCustomerInfo({...customerInfo, name: e.target.value})} />
                             <button onClick={handleConvertToFullTax} className="w-full bg-[#606C38] text-white py-3 rounded-2xl font-bold">บันทึกใบกำกับภาษีเต็มรูป</button>
                          </div>
@@ -789,7 +953,7 @@ const App = () => {
                 ) : (
                   <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                       <h4 className="font-black uppercase text-xs flex items-center gap-2"><ClipboardList size={16} className="text-[#B3543D]"/> รายการขายแบบเจาะลึก (Big Data Log)</h4>
-                      <div className="bg-white rounded-[40px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">สินค้า</th><th className="px-6 py-5 text-center">จำนวน</th><th className="px-6 py-5 text-right">รวม</th><th className="px-6 py-5 text-center">ช่องทาง</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{analyticsData.itemizedSalesLog.reverse().map((item, idx) => (<tr key={idx} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C]"><td className="px-6 py-5 text-[#8B8A73]">{item.date}</td><td className="px-6 py-5">{item.name}</td><td className="px-6 py-5 text-center">{item.qty}</td><td className="px-6 py-5 text-right text-[#B3543D]">฿{Number(item.total).toLocaleString()}</td><td className="px-6 py-5 text-center"><span className="px-2 py-0.5 bg-white border border-[#D7BA9D]/30 rounded-full text-[9px]">{item.channel}</span></td></tr>))}</tbody></table></div></div>
+                      <div className="bg-white rounded-[40px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">สินค้า</th><th className="px-6 py-5 text-center">จำนวน</th><th className="px-6 py-5 text-right">รวม</th><th className="px-6 py-5 text-center">ช่องทาง</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{[...analyticsData.itemizedSalesLog].reverse().map((item, idx) => (<tr key={idx} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C]"><td className="px-6 py-5 text-[#8B8A73]">{safeDate(item.date)}</td><td className="px-6 py-5">{safeStr(item.name)}</td><td className="px-6 py-5 text-center">{item.qty}</td><td className="px-6 py-5 text-right text-[#B3543D]">฿{Number(item.total).toLocaleString()}</td><td className="px-6 py-5 text-center"><span className="px-2 py-0.5 bg-white border border-[#D7BA9D]/30 rounded-full text-[9px]">{safeStr(item.channel)}</span></td></tr>))}</tbody></table></div></div>
                   </div>
                 )}
              </div>
@@ -803,15 +967,15 @@ const App = () => {
                    <button onClick={() => setCrmTypeFilter('vendor')} className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${crmTypeFilter === 'vendor' ? 'bg-white text-[#B3543D] shadow-sm' : ''}`}>คู่ค้า</button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                   {contacts.filter(c => (crmTypeFilter === 'all' || c.type === crmTypeFilter) && (c.name.includes(searchTerm) || (c.taxId && c.taxId.includes(searchTerm)))).map(c => (
+                   {contacts?.filter(c => (crmTypeFilter === 'all' || c.type === crmTypeFilter) && ((c.name || '').includes(searchTerm) || (c.taxId && c.taxId.includes(searchTerm)))).map(c => (
                     <div key={c.id} className="bg-white p-8 rounded-[40px] border border-[#D7BA9D]/20 shadow-sm group hover:border-[#B3543D]/50 transition-all text-[#433D3C]">
                        <div className="flex justify-between items-start mb-6">
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${c.type === 'customer' ? 'bg-blue-50 text-blue-500' : 'bg-orange-50 text-orange-500'}`}><Users size={24}/></div>
                           <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${c.type === 'customer' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{c.type}</span>
                        </div>
-                       <h4 className="text-lg font-black mb-1">{c.name}</h4>
-                       <p className="text-xs text-[#8B8A73] mb-4">{c.address || 'ไม่ระบุที่อยู่'}</p>
-                       <div className="pt-6 border-t border-[#F5F0E6] flex justify-between text-[11px] font-bold text-[#8B8A73]"><span>Branch: {c.branch}</span><span>Tax ID: {c.taxId}</span></div>
+                       <h4 className="text-lg font-black mb-1">{safeStr(c.name)}</h4>
+                       <p className="text-xs text-[#8B8A73] mb-4">{safeStr(c.address) || 'ไม่ระบุที่อยู่'}</p>
+                       <div className="pt-6 border-t border-[#F5F0E6] flex justify-between text-[11px] font-bold text-[#8B8A73]"><span>Branch: {safeStr(c.branch)}</span><span>Tax ID: {safeStr(c.taxId)}</span></div>
                        <div className="flex justify-end gap-2 mt-4 pt-4 border-t border-[#F5F0E6]">
                           <button onClick={() => setViewingContact(c)} className="p-2 text-[#8B8A73] hover:text-[#B3543D] hover:bg-[#F5F0E6] rounded-full transition-all"><Eye size={16}/></button>
                           <button onClick={() => handleEditContact(c)} className="p-2 text-[#8B8A73] hover:text-[#B3543D] hover:bg-[#F5F0E6] rounded-full transition-all"><Edit2 size={16}/></button>
@@ -836,14 +1000,14 @@ const App = () => {
           <div className="space-y-4 text-left text-[#433D3C]">
              <div className="text-center mb-6">
                 <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center mb-2 ${viewingContact.type === 'customer' ? 'bg-blue-50 text-blue-500' : 'bg-orange-50 text-orange-500'}`}><Users size={32}/></div>
-                <h3 className="font-bold text-xl">{viewingContact.name}</h3>
+                <h3 className="font-bold text-xl">{safeStr(viewingContact.name)}</h3>
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${viewingContact.type === 'customer' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{viewingContact.type}</span>
              </div>
              <div className="space-y-3 bg-[#FDFCF8] p-6 rounded-3xl border border-[#D7BA9D]/20">
-                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">Tax ID</span><span className="font-bold font-mono text-sm">{viewingContact.taxId || '-'}</span></div>
-                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">สาขา</span><span className="font-bold text-sm">{viewingContact.branch}</span></div>
-                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">เบอร์โทร</span><span className="font-bold text-sm">{viewingContact.phone || '-'}</span></div>
-                <div><span className="text-xs text-[#8B8A73] block mb-1">ที่อยู่</span><p className="font-bold text-sm leading-relaxed">{viewingContact.address || '-'}</p></div>
+                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">Tax ID</span><span className="font-bold font-mono text-sm">{safeStr(viewingContact.taxId) || '-'}</span></div>
+                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">สาขา</span><span className="font-bold text-sm">{safeStr(viewingContact.branch)}</span></div>
+                <div className="flex justify-between items-center pb-2 border-b border-[#F5F0E6]"><span className="text-xs text-[#8B8A73]">เบอร์โทร</span><span className="font-bold text-sm">{safeStr(viewingContact.phone) || '-'}</span></div>
+                <div><span className="text-xs text-[#8B8A73] block mb-1">ที่อยู่</span><p className="font-bold text-sm leading-relaxed">{safeStr(viewingContact.address) || '-'}</p></div>
              </div>
           </div>
         )}
@@ -894,32 +1058,89 @@ const App = () => {
                <div><label className="text-[10px] font-black text-[#8B8A73] uppercase block mb-1">หน่วย</label><select className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm outline-none" value={newProduct.uom} onChange={e => setNewProduct({...newProduct, uom: e.target.value})}><option>ชิ้น</option><option>แพ็ค</option><option>ลัง</option></select></div>
             </div>
           </div>
-          <button type="submit" className="w-full bg-[#B3543D] text-white py-4 rounded-3xl font-black shadow-lg">บันทึกสินค้าลงฐานข้อมูล</button>
+          <button type="submit" className="w-full bg-[#B3543D] text-white py-4 rounded-2xl font-bold shadow-lg">บันทึกสินค้าลงฐานข้อมูล</button>
         </form>
       </Modal>
 
-      <Modal isOpen={isStockModalOpen} onClose={() => setStockModalOpen(false)} title="รับสต็อก & ภาษีซื้อ">
+      <Modal isOpen={isStockModalOpen} onClose={() => setStockModalOpen(false)} title="รับสต็อก & ภาษีซื้อ" maxWidth="max-w-2xl">
         <form onSubmit={handleReceiveStock} className="space-y-4 text-left text-[#433D3C]">
-          <div><label className="text-[9px] font-bold text-[#8B8A73] uppercase block mb-1">เลือกสินค้า</label><select className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#B3543D]" required value={newStock.productId} onChange={e => setNewStock({...newStock, productId: e.target.value})}><option value="">-- เลือก --</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
-          <div className="grid grid-cols-2 gap-3">
-             <div><label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">เลขล็อต</label><input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" required value={newStock.lotNo} onChange={e => setNewStock({...newStock, lotNo: e.target.value})} /></div>
-             <div><label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">วันที่</label><input type="date" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" value={newStock.receiveDate} onChange={e => setNewStock({...newStock, receiveDate: e.target.value})} /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3 text-left">
-             <div><label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">จำนวน</label><input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" required value={newStock.qty} onChange={e => setNewStock({...newStock, qty: e.target.value})} /></div>
-             <div><label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">ต้นทุน/หน่วย</label><input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" required value={newStock.cost} onChange={e => setNewStock({...newStock, cost: e.target.value})} /></div>
-          </div>
-          <div className="pt-3 border-t border-[#F5F0E6] space-y-3">
+          {/* Vendor Section - ย้ายมาไว้บนสุด */}
+          <div className="space-y-3 p-4 border border-[#D7BA9D]/20 rounded-2xl">
              <div className="flex justify-between items-center"><p className="text-[10px] text-[#B3543D] font-bold uppercase tracking-widest">ข้อมูลคู่ค้า (Vendor)</p></div>
-             <div><button type="button" onClick={() => setVendorPickerOpen(true)} className="w-full flex items-center justify-between bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-xs text-[#8B8A73] hover:border-[#B3543D] transition-all"><span>{newStock.vendor || "คลิกเพื่อค้นหาคู่ค้า..."}</span><ChevronRight size={12}/></button></div>
-             <div><label className="text-[9px] text-[#8B8A73] uppercase mb-1 block">ชื่อผู้ขาย</label><input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" value={newStock.vendor} onChange={e => setNewStock({...newStock, vendor: e.target.value})} /></div>
-             <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-[9px] text-[#8B8A73] uppercase mb-1 block">Tax ID</label><input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm font-mono focus:border-[#B3543D] outline-none" value={newStock.taxId} onChange={e => setNewStock({...newStock, taxId: e.target.value})} /></div>
-                <div><label className="text-[9px] text-[#8B8A73] uppercase mb-1 block">สาขา</label><input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm focus:border-[#B3543D] outline-none" value={newStock.branch} onChange={e => setNewStock({...newStock, branch: e.target.value})} /></div>
+             <div className="flex gap-2">
+                <button type="button" onClick={() => setVendorPickerOpen(true)} className="flex-1 flex items-center justify-between bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-xs text-[#8B8A73] hover:border-[#B3543D] transition-all"><span>{newStock.vendor || "คลิกเพื่อค้นหาคู่ค้า..."}</span><ChevronRight size={12}/></button>
+                <input type="text" placeholder="Tax ID" className="w-1/3 bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-xs font-mono text-center outline-none" value={newStock.taxId} onChange={e => setNewStock({...newStock, taxId: e.target.value})} />
+             </div>
+          </div>
+
+          {/* Header Info */}
+          <div className="flex gap-4 p-4 bg-[#F5F0E6] rounded-2xl mb-2 items-end">
+             <div className="flex-1">
+                <label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">เลขล็อต (อัตโนมัติ)</label>
+                <div className="font-mono text-sm font-bold text-[#B3543D]">{newStock.lotNo || 'Auto'}</div>
+             </div>
+             <div>
+                <label className="text-[9px] font-bold uppercase text-[#8B8A73] mb-1 block">วันที่</label>
+                <input type="date" className="bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-1.5 text-sm focus:border-[#B3543D] outline-none" value={newStock.receiveDate} onChange={e => setNewStock({...newStock, receiveDate: e.target.value})} />
+             </div>
+          </div>
+
+          {/* Add Items Section */}
+          <div className="space-y-2">
+             <p className="text-[10px] text-[#8B8A73] font-bold uppercase tracking-widest px-1">รายการสินค้า</p>
+             <div className="flex gap-2 items-end">
+                <div className="flex-1">
+                   <select className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm outline-none focus:border-[#B3543D]" value={stockItemInput.productId} onChange={e => setStockItemInput({...stockItemInput, productId: e.target.value})}>
+                      <option value="">-- เลือกสินค้า --</option>
+                      {products?.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                   </select>
+                </div>
+                <div className="w-20"><input type="number" placeholder="ทุน" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm text-center outline-none" value={stockItemInput.cost} onChange={e => setStockItemInput({...stockItemInput, cost: e.target.value})} /></div>
+                <div className="w-20"><input type="number" placeholder="จำนวน" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-3 py-2 text-sm text-center outline-none" value={stockItemInput.qty} onChange={e => setStockItemInput({...stockItemInput, qty: e.target.value})} /></div>
+                <button type="button" onClick={handleAddStockItem} className="bg-[#B3543D] text-white p-2 rounded-xl hover:bg-[#963F2C]"><Plus size={20}/></button>
+             </div>
+
+             {/* Items Table */}
+             <div className="max-h-40 overflow-y-auto border border-[#D7BA9D]/20 rounded-xl bg-white">
+                <table className="w-full text-left text-xs">
+                   <thead className="bg-[#F5F0E6] text-[#8B8A73]">
+                      <tr>
+                         <th className="p-2">สินค้า</th>
+                         <th className="p-2 text-right">ทุน</th>
+                         <th className="p-2 text-right">จำนวน</th>
+                         <th className="p-2 text-right">รวม</th>
+                         <th className="w-8"></th>
+                      </tr>
+                   </thead>
+                   <tbody className="divide-y divide-[#F5F0E6]">
+                      {newStock.items?.length === 0 && <tr><td colSpan="5" className="p-4 text-center text-[#8B8A73] italic">ยังไม่มีรายการ</td></tr>}
+                      {newStock.items?.map((item, idx) => (
+                         <tr key={idx}>
+                            <td className="p-2">{item.name}</td>
+                            <td className="p-2 text-right">{Number(item.cost).toLocaleString()}</td>
+                            <td className="p-2 text-right">{item.qty}</td>
+                            <td className="p-2 text-right font-bold">{(item.cost * item.qty).toLocaleString()}</td>
+                            <td className="p-2 text-center"><button type="button" onClick={() => handleRemoveStockItem(idx)} className="text-red-400 hover:text-red-600"><X size={14}/></button></td>
+                         </tr>
+                      ))}
+                   </tbody>
+                </table>
+             </div>
+          </div>
+
+          {/* Footer & Totals */}
+          <div className="pt-3 border-t border-[#F5F0E6] space-y-3">
+             <div className="flex justify-between items-center">
+                <span className="text-xs font-bold">ส่วนลดท้ายบิล / คูปองเงินสด</span>
+                <input type="number" className="w-24 bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-lg px-2 py-1 text-sm text-right outline-none text-red-500 font-bold" placeholder="0.00" value={newStock.discount} onChange={e => setNewStock({...newStock, discount: e.target.value})} />
              </div>
              <div className="flex items-center justify-between p-3 bg-[#FDFCF8] border border-[#D7BA9D]/20 rounded-xl">
                 <span className="text-xs">บันทึกภาษีซื้อ (VAT 7%)</span>
                 <button type="button" onClick={() => setNewStock({...newStock, includeVat: !newStock.includeVat})} className={`w-8 h-4 rounded-full relative transition-all ${newStock.includeVat ? 'bg-[#606C38]' : 'bg-[#D7BA9D]'}`}><div className={`w-2.5 h-2.5 bg-white rounded-full absolute top-0.5 transition-all ${newStock.includeVat ? 'left-5' : 'left-0.5'}`} /></button>
+             </div>
+             <div className="flex justify-between items-center text-lg font-bold text-[#433D3C]">
+                <span>ยอดสุทธิ</span>
+                <span className="text-[#B3543D]">฿{Math.max(0, (newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) || 0) - Number(newStock.discount)).toLocaleString()}</span>
              </div>
           </div>
           <button type="submit" className="w-full bg-[#433D3C] text-white py-4 rounded-2xl font-bold mt-2 shadow-lg shadow-black/10 transition-all hover:scale-[1.01]">ยืนยันรับสต็อกลงคลาวด์</button>
