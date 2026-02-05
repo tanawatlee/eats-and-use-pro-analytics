@@ -24,7 +24,8 @@ import {
   CloudCog,
   ToggleLeft,
   ToggleRight,
-  AlertTriangle
+  AlertTriangle,
+  Loader2
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -109,13 +110,13 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
 };
 
 const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentAppId }) => (
-  <aside className="w-64 bg-[#F5F0E6] flex flex-col h-full border-r border-[#D7BA9D]/30 transition-all">
+  <aside className="w-64 bg-[#F5F0E6] flex flex-col h-full border-r border-[#D7BA9D]/30 transition-all flex-shrink-0">
     <div className="p-10 flex flex-col items-center text-center">
       <div className="w-16 h-16 bg-[#B3543D] rounded-full flex items-center justify-center text-white mb-4 shadow-lg shadow-[#B3543D]/20"><Leaf size={32} /></div>
       <h1 className="text-xl font-bold text-[#433D3C]">eats and use</h1>
       <p className="text-[10px] text-[#8B8A73] uppercase tracking-[0.2em] font-bold">Pro Analytics POS</p>
     </div>
-    <nav className="flex-1 px-6 space-y-2">
+    <nav className="flex-1 px-6 space-y-2 overflow-y-auto custom-scrollbar">
       {[
         { id: 'pos', icon: ShoppingCart, label: 'ขายสินค้า' },
         { id: 'inventory', icon: Package, label: 'คลังสินค้า' },
@@ -129,6 +130,7 @@ const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentApp
       ))}
     </nav>
     <div className="p-6 text-center space-y-3">
+      {/* Dev Mode Toggle */}
       <button 
         onClick={handleToggleMode}
         className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-xs font-bold transition-all border shadow-sm hover:scale-[1.02] active:scale-95 ${isDevMode ? 'bg-red-50 border-red-200 text-red-600' : 'bg-green-50 border-green-200 text-green-700'}`}
@@ -143,7 +145,7 @@ const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentApp
       <div className={`bg-[#E8E1D5] rounded-xl p-3 border border-[#D7BA9D]/30 transition-all ${isDevMode ? 'opacity-100' : 'opacity-60'}`}>
          <div className="flex items-center justify-center gap-2 text-[#433D3C] font-bold text-xs mb-1">
             <CloudCog size={14} className="text-[#B3543D]"/>
-            <span>DB: {currentAppId.slice(0,12)}...</span>
+            <span>DB: {currentAppId.slice(0,10)}...</span>
          </div>
          <p className={`text-[9px] font-bold uppercase tracking-widest ${isDevMode ? 'text-red-500' : 'text-[#606C38]'}`}>
             {isDevMode ? 'Connected to Dev' : 'Connected to Prod'}
@@ -575,7 +577,7 @@ const App = () => {
 
   if (loading && user) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center bg-[#FDFCF8] text-[#8B8A73]">
+      <div className="h-screen h-[100dvh] w-full flex flex-col items-center justify-center bg-[#FDFCF8] text-[#8B8A73]">
           <Leaf size={48} className="animate-bounce mb-4 text-[#B3543D]" />
           <p className="font-bold uppercase tracking-widest text-xs">eats and use POS Loading...</p>
       </div>
@@ -585,7 +587,7 @@ const App = () => {
   // --- Auth Error State UI ---
   if (authStatus === 'error') {
     return (
-      <div className="h-screen flex flex-col items-center justify-center bg-red-50 text-red-800 p-8 text-center">
+      <div className="h-screen h-[100dvh] w-full flex flex-col items-center justify-center bg-red-50 text-red-800 p-8 text-center">
           <AlertTriangle size={64} className="mb-4 text-red-500" />
           <h2 className="text-2xl font-bold mb-2">Authentication Failed</h2>
           <p className="text-sm mb-6">{authErrorMessage}</p>
@@ -605,7 +607,7 @@ const App = () => {
   }
 
   return (
-    <div className="flex h-screen bg-[#FDFCF8] text-[#433D3C] overflow-hidden" style={{ fontFamily: "'Noto Sans Thai', sans-serif" }}>
+    <div className="flex h-screen h-[100dvh] w-full bg-[#FDFCF8] text-[#433D3C] overflow-hidden supports-[height:100dvh]:h-[100dvh]" style={{ fontFamily: "'Noto Sans Thai', sans-serif" }}>
       <Sidebar 
         currentView={view} 
         setView={setView} 
@@ -615,18 +617,18 @@ const App = () => {
       />
 
       <main className="flex-1 flex flex-col min-w-0">
-        <header className="h-20 bg-white/40 backdrop-blur-md border-b border-[#D7BA9D]/20 flex items-center justify-between px-10">
+        <header className="h-20 bg-white/40 backdrop-blur-md border-b border-[#D7BA9D]/20 flex items-center justify-between px-6 md:px-10 shrink-0">
           <h2 className="text-lg font-bold tracking-tight text-[#8B8A73] uppercase tracking-widest">{view === 'pos' ? 'Terminal' : view}</h2>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B8A73]" size={14} />
-            <input type="text" placeholder="ค้นหา..." className="pl-9 pr-4 py-2 bg-white border border-[#D7BA9D]/30 rounded-full text-xs w-60 outline-none focus:border-[#B3543D]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+            <input type="text" placeholder="ค้นหา..." className="pl-9 pr-4 py-2 bg-white border border-[#D7BA9D]/30 rounded-full text-xs w-48 md:w-60 outline-none focus:border-[#B3543D]" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
           </div>
         </header>
 
-        <section className="flex-1 overflow-y-auto p-10">
+        <section className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
           {view === 'pos' && (
-            <div className="flex gap-10 h-full max-w-[1500px] mx-auto animate-in fade-in duration-300">
-              <div className="flex-1 space-y-6">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-10 h-full max-w-[1500px] mx-auto animate-in fade-in duration-300">
+              <div className="flex-1 space-y-6 overflow-y-auto custom-scrollbar pr-2 pb-20 md:pb-0">
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide text-[#433D3C]">
                   {Object.keys(channelConfig).map(ch => (
                     <button key={ch} onClick={() => setSalesChannel(ch)} className={`flex-shrink-0 flex items-center gap-2 px-4 py-2 rounded-2xl border transition-all font-bold text-xs ${salesChannel === ch ? 'bg-white text-[#B3543D] border-[#B3543D] shadow-sm' : 'bg-[#F5F0E6] text-[#8B8A73] border-transparent hover:bg-white'}`}>
@@ -634,11 +636,11 @@ const App = () => {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                   {products.filter(p => p.name.includes(searchTerm) || p.sku.includes(searchTerm)).map(product => {
                     const info = getProductStockInfo(product.id);
                     return (
-                      <div key={product.id} onClick={() => addToCart(product)} className={`bg-white p-6 rounded-3xl border border-[#D7BA9D]/20 hover:border-[#B3543D]/50 cursor-pointer transition-all ${info.totalQty === 0 ? 'opacity-50' : ''}`}>
+                      <div key={product.id} onClick={() => addToCart(product)} className={`bg-white p-5 md:p-6 rounded-3xl border border-[#D7BA9D]/20 hover:border-[#B3543D]/50 cursor-pointer transition-all ${info.totalQty === 0 ? 'opacity-50' : ''}`}>
                         <div className="w-10 h-10 bg-[#F5F0E6] rounded-xl flex items-center justify-center text-[#B3543D] mb-4"><Box size={20} /></div>
                         <h4 className="font-bold text-sm mb-1">{product.name}</h4>
                         <div className="flex justify-between items-end mt-4">
@@ -651,9 +653,17 @@ const App = () => {
                 </div>
               </div>
 
-              <div className="w-[450px] bg-white rounded-[40px] border border-[#D7BA9D]/20 flex flex-col shadow-sm">
-                <div className="p-8 border-b border-[#F5F0E6] flex items-center gap-3 text-[#433D3C]"><ShoppingCart className="text-[#B3543D]" /> <h3 className="font-bold text-sm">รายการขาย</h3></div>
-                <div className="flex-1 p-8 space-y-6 overflow-y-auto">
+              <div className="w-full md:w-[400px] lg:w-[450px] bg-white rounded-t-[32px] md:rounded-[40px] border-t md:border border-[#D7BA9D]/20 flex flex-col shadow-lg md:shadow-sm fixed bottom-0 left-0 right-0 md:static z-20 h-[80vh] md:h-auto transform transition-transform duration-300 translate-y-[calc(100%-80px)] md:translate-y-0 peer-checked:translate-y-0 group">
+                <div className="p-6 md:p-8 border-b border-[#F5F0E6] flex items-center justify-between text-[#433D3C] cursor-pointer md:cursor-default" onClick={(e) => {
+                    // Simple toggle for mobile view logic could go here if using state, but using CSS hover/focus for simplicity in this demo or just static
+                }}>
+                    <div className="flex items-center gap-3">
+                        <ShoppingCart className="text-[#B3543D]" /> 
+                        <h3 className="font-bold text-sm">รายการขาย <span className="md:hidden text-xs text-[#8B8A73]">(แตะเพื่อเปิด)</span></h3>
+                    </div>
+                    <div className="md:hidden font-bold text-[#B3543D]">฿{derivedValues.finalReceive.toLocaleString()}</div>
+                </div>
+                <div className="flex-1 p-6 md:p-8 space-y-6 overflow-y-auto custom-scrollbar bg-white">
                   {cart.length === 0 ? <p className="text-center text-[#8B8A73] text-xs py-10 italic">ว่าง</p> : cart.map(item => (
                     <div key={item.id} className="flex justify-between items-center bg-[#FDFCF8] p-3 rounded-2xl border border-[#F5F0E6] text-[#433D3C]">
                       <div className="min-w-0 pr-2"><p className="font-bold text-xs truncate">{item.name}</p><p className="text-[10px] text-[#B3543D] font-bold">฿{Number(item.price).toLocaleString()}</p></div>
@@ -683,7 +693,7 @@ const App = () => {
                     </div>
                   </div>
                 </div>
-                <div className="p-8 bg-[#F5F0E6]/50 rounded-b-[40px] border-t border-[#F5F0E6] space-y-4 text-[#433D3C]">
+                <div className="p-6 md:p-8 bg-[#F5F0E6]/50 md:rounded-b-[40px] border-t border-[#F5F0E6] space-y-4 text-[#433D3C] pb-10 md:pb-8">
                   <div className="flex justify-between text-lg font-bold"><span>ยอดรับสุทธิ</span><span className="text-[#B3543D]">฿{derivedValues.finalReceive.toLocaleString()}</span></div>
                   <button onClick={handleCheckout} disabled={cart.length === 0} className="w-full bg-[#B3543D] text-white py-4 rounded-2xl font-bold text-sm shadow-lg hover:bg-[#963F2C] transition-all">ยืนยันการขาย</button>
                 </div>
@@ -709,7 +719,8 @@ const App = () => {
                
                {selectedProductId ? (
                  <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px] animate-in slide-in-from-right-4 duration-300">
-                    <table className="w-full text-left">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-left min-w-[600px]">
                       <thead className="bg-[#F5F0E6]/50 border-b text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest">
                         <tr><th className="px-6 py-5">รหัสล็อต</th><th className="px-6 py-5">วันที่รับเข้า</th><th className="px-6 py-5 text-right">แรกรับ</th><th className="px-6 py-5 text-right">คงเหลือ</th></tr>
                       </thead>
@@ -724,12 +735,15 @@ const App = () => {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                  </div>
                ) : (
                  <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]">
-                    <table className="w-full text-left"><thead className="bg-[#F5F0E6]/50 border-b text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5 w-12 text-center">#</th><th className="px-6 py-5">สินค้า (คลิกเพื่อดูล็อต)</th><th className="px-6 py-5 text-right">สต็อกรวม</th><th className="px-6 py-5 text-right">มูลค่ารวม</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/50 border-b text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5 w-12 text-center">#</th><th className="px-6 py-5">สินค้า (คลิกเพื่อดูล็อต)</th><th className="px-6 py-5 text-right">สต็อกรวม</th><th className="px-6 py-5 text-right">มูลค่ารวม</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">
                         {productInventorySummary.map(item => (<tr key={item.id} onClick={() => setSelectedProductId(item.id)} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C] cursor-pointer"><td className="px-6 py-5 text-center text-[#8B8A73]">{item.index}</td><td className="px-6 py-5"><div>{item.name}</div><div className="text-[9px] text-[#B3543D] font-mono">{item.sku}</div></td><td className="px-6 py-5 text-right">{item.remaining} {item.uom}</td><td className="px-6 py-5 text-right font-black">฿{item.totalValue.toLocaleString()}</td></tr>))}
                     </tbody></table>
+                    </div>
                  </div>
                )}
             </div>
@@ -742,7 +756,7 @@ const App = () => {
                    <div className="bg-white p-6 rounded-[32px] border border-[#D7BA9D]/20 shadow-sm"><p className="text-[10px] text-[#8B8A73] uppercase mb-1">รายจ่ายรวม</p><h4 className="text-xl text-[#B3543D]">฿{accSummary.expense.toLocaleString()}</h4></div>
                    <div className="bg-[#433D3C] text-white p-6 rounded-[32px] shadow-lg"><p className="text-[10px] opacity-70 uppercase mb-1">คงเหลือ</p><h4 className="text-xl">฿{accSummary.balance.toLocaleString()}</h4></div>
                 </div>
-                <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><table className="w-full text-left"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">รายการ</th><th className="px-6 py-5 text-right">จำนวนเงิน</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{transactions.map(t => (<tr key={t.id} className="hover:bg-[#FDFCF8] font-bold"><td className="px-6 py-5 text-[#8B8A73]">{t.date}</td><td className="px-6 py-5">{t.category} ({t.customer})</td><td className={`px-6 py-5 text-right ${t.type === 'income' ? 'text-[#606C38]' : 'text-[#B3543D]'}`}>฿{(t.amount + (t.shippingIncome || 0) - (t.discount || 0)).toLocaleString()}</td></tr>))}</tbody></table></div>
+                <div className="bg-white rounded-[32px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">รายการ</th><th className="px-6 py-5 text-right">จำนวนเงิน</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{transactions.map(t => (<tr key={t.id} className="hover:bg-[#FDFCF8] font-bold"><td className="px-6 py-5 text-[#8B8A73]">{t.date}</td><td className="px-6 py-5">{t.category} ({t.customer})</td><td className={`px-6 py-5 text-right ${t.type === 'income' ? 'text-[#606C38]' : 'text-[#B3543D]'}`}>฿{(t.amount + (t.shippingIncome || 0) - (t.discount || 0)).toLocaleString()}</td></tr>))}</tbody></table></div></div>
              </div>
           )}
 
@@ -757,7 +771,7 @@ const App = () => {
                   <div className="space-y-8 animate-in slide-in-from-left-4 duration-300">
                     <div className="bg-[#FEFAE0] p-8 rounded-[40px] border border-[#CCD5AE] space-y-4">
                        <h4 className="font-black uppercase text-xs">แปลงใบกำกับภาษีอย่างย่อเป็นแบบเต็มรูป</h4>
-                       <div className="flex gap-4">
+                       <div className="flex flex-col md:flex-row gap-4">
                           <input type="text" placeholder="เลขอ้างอิงใบเสร็จ..." className="flex-1 bg-white border border-[#CCD5AE] rounded-2xl px-5 py-3 text-sm focus:border-[#B3543D] outline-none" value={searchReceiptId} onChange={e => setSearchReceiptId(e.target.value)} />
                           <button onClick={handleSearchReceipt} className="bg-[#B3543D] text-white px-8 py-3 rounded-2xl font-bold hover:bg-[#963F2C]">ค้นหา</button>
                        </div>
@@ -773,7 +787,7 @@ const App = () => {
                 ) : (
                   <div className="space-y-6 animate-in slide-in-from-right-4 duration-300">
                       <h4 className="font-black uppercase text-xs flex items-center gap-2"><ClipboardList size={16} className="text-[#B3543D]"/> รายการขายแบบเจาะลึก (Big Data Log)</h4>
-                      <div className="bg-white rounded-[40px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><table className="w-full text-left"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">สินค้า</th><th className="px-6 py-5 text-center">จำนวน</th><th className="px-6 py-5 text-right">รวม</th><th className="px-6 py-5 text-center">ช่องทาง</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{analyticsData.itemizedSalesLog.reverse().map((item, idx) => (<tr key={idx} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C]"><td className="px-6 py-5 text-[#8B8A73]">{item.date}</td><td className="px-6 py-5">{item.name}</td><td className="px-6 py-5 text-center">{item.qty}</td><td className="px-6 py-5 text-right text-[#B3543D]">฿{Number(item.total).toLocaleString()}</td><td className="px-6 py-5 text-center"><span className="px-2 py-0.5 bg-white border border-[#D7BA9D]/30 rounded-full text-[9px]">{item.channel}</span></td></tr>))}</tbody></table></div>
+                      <div className="bg-white rounded-[40px] border border-[#D7BA9D]/20 shadow-sm overflow-hidden text-[11px]"><div className="overflow-x-auto"><table className="w-full text-left min-w-[600px]"><thead className="bg-[#F5F0E6]/30 text-[9px] font-bold text-[#8B8A73] uppercase tracking-widest"><tr><th className="px-6 py-5">วันที่</th><th className="px-6 py-5">สินค้า</th><th className="px-6 py-5 text-center">จำนวน</th><th className="px-6 py-5 text-right">รวม</th><th className="px-6 py-5 text-center">ช่องทาง</th></tr></thead><tbody className="divide-y divide-[#F5F0E6]">{analyticsData.itemizedSalesLog.reverse().map((item, idx) => (<tr key={idx} className="hover:bg-[#FDFCF8] font-bold text-[#433D3C]"><td className="px-6 py-5 text-[#8B8A73]">{item.date}</td><td className="px-6 py-5">{item.name}</td><td className="px-6 py-5 text-center">{item.qty}</td><td className="px-6 py-5 text-right text-[#B3543D]">฿{Number(item.total).toLocaleString()}</td><td className="px-6 py-5 text-center"><span className="px-2 py-0.5 bg-white border border-[#D7BA9D]/30 rounded-full text-[9px]">{item.channel}</span></td></tr>))}</tbody></table></div></div>
                   </div>
                 )}
              </div>
