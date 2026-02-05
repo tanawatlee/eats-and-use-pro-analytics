@@ -25,7 +25,9 @@ import {
   ToggleLeft,
   ToggleRight,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Maximize2, 
+  Minimize2  
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -627,7 +629,7 @@ const App = () => {
 
         <section className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
           {view === 'pos' && (
-            <div className="flex flex-col md:flex-row gap-6 md:gap-10 h-full max-w-[1500px] mx-auto animate-in fade-in duration-300">
+            <div className="flex flex-col md:flex-row gap-6 md:gap-10 h-full w-full animate-in fade-in duration-300">
               <div className="flex-1 space-y-6 overflow-y-auto custom-scrollbar pr-2 pb-20 md:pb-0">
                 <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide text-[#433D3C]">
                   {Object.keys(channelConfig).map(ch => (
@@ -702,7 +704,7 @@ const App = () => {
           )}
 
           {view === 'inventory' && (
-            <div className="space-y-8 max-w-[1400px] mx-auto animate-in fade-in duration-300 text-[#433D3C]">
+            <div className="space-y-8 w-full animate-in fade-in duration-300 text-[#433D3C]">
                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                  <div>
                     <div className="flex items-center gap-3">
@@ -750,7 +752,7 @@ const App = () => {
           )}
 
           {view === 'accounting' && (
-             <div className="space-y-8 max-w-[1400px] mx-auto animate-in fade-in duration-300 text-[#433D3C]">
+             <div className="space-y-8 w-full animate-in fade-in duration-300 text-[#433D3C]">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 font-bold text-center">
                    <div className="bg-white p-6 rounded-[32px] border border-[#D7BA9D]/20 shadow-sm"><p className="text-[10px] text-[#8B8A73] uppercase mb-1">รายรับรวม</p><h4 className="text-xl text-[#606C38]">฿{accSummary.income.toLocaleString()}</h4></div>
                    <div className="bg-white p-6 rounded-[32px] border border-[#D7BA9D]/20 shadow-sm"><p className="text-[10px] text-[#8B8A73] uppercase mb-1">รายจ่ายรวม</p><h4 className="text-xl text-[#B3543D]">฿{accSummary.expense.toLocaleString()}</h4></div>
@@ -794,7 +796,7 @@ const App = () => {
           )}
 
           {view === 'contacts' && (
-             <div className="space-y-8 max-w-[1400px] mx-auto animate-in fade-in duration-300 text-[#433D3C]">
+             <div className="space-y-8 w-full animate-in fade-in duration-300 text-[#433D3C]">
                 <div className="flex items-center gap-4 bg-[#F5F0E6] p-1 rounded-2xl w-fit">
                    <button onClick={() => setCrmTypeFilter('all')} className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${crmTypeFilter === 'all' ? 'bg-white text-[#B3543D] shadow-sm' : ''}`}>ทั้งหมด</button>
                    <button onClick={() => setCrmTypeFilter('customer')} className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${crmTypeFilter === 'customer' ? 'bg-white text-[#B3543D] shadow-sm' : ''}`}>ลูกค้า</button>
