@@ -179,10 +179,49 @@ const GlobalStyles = () => (
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
     
     @media print {
+      @page { margin: 0; size: auto; }
+      body, html { 
+        height: auto !important; 
+        overflow: visible !important; 
+        background: white !important; 
+      }
+      
+      /* Hide everything by default */
+      body * {
+        visibility: hidden;
+      }
+      
+      /* Show only the invoice container and its children */
+      .invoice-preview-container, .invoice-preview-container * {
+        visibility: visible !important;
+      }
+      
+      /* Force positioning for the invoice container */
+      .invoice-preview-container {
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 30px !important; /* Margin for paper edge */
+        background-color: white !important;
+        border: none !important;
+        box-shadow: none !important;
+        min-height: auto !important;
+        z-index: 9999 !important;
+        border-radius: 0 !important;
+      }
+
+      /* Helper classes */
       .no-print { display: none !important; }
       .print-only { display: block !important; }
-      body { background: white !important; }
       .modal-content { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; }
+      
+      /* Ensure colors print exactly as seen */
+      * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+      }
     }
   `}</style>
 );
@@ -1213,7 +1252,7 @@ const App = () => {
       {/* Modal: Full Tax Invoice View (ใบกำกับภาษีเต็มรูป) */}
       <Modal isOpen={isFullInvoicePreviewOpen} onClose={() => setFullInvoicePreviewOpen(false)} title="ใบกำกับภาษีเต็มรูป (Full Tax Invoice)" maxWidth="max-w-3xl">
           {selectedInvoice && (
-              <div className="bg-white p-8 text-[#333] font-mono-receipt border border-gray-200 shadow-lg relative min-h-[800px] flex flex-col justify-between">
+              <div className="bg-white p-8 text-[#333] font-mono-receipt border border-gray-200 shadow-lg relative min-h-[800px] flex flex-col justify-between invoice-preview-container">
                   {/* Header / Actions */}
                   <div className="absolute top-4 right-4 no-print flex gap-2 z-10">
                       <button 
@@ -1247,19 +1286,27 @@ const App = () => {
                            </div>
 
                            {/* Document Meta */}
-                           <div className="w-[35%] text-right space-y-2">
-                              <h5 className="text-xl font-bold uppercase tracking-wide">ใบกำกับภาษี / ใบเสร็จรับเงิน</h5>
-                              <p className="text-xs font-bold text-gray-500">TAX INVOICE / RECEIPT</p>
-                              <div className="border border-gray-300 p-2 rounded text-center bg-gray-50">
-                                  <p className="text-sm font-bold">{invoiceType === 'original' ? 'ต้นฉบับ / Original' : 'สำเนา / Copy'}</p>
+                           <div className="w-[35%] text-right space-y-1">
+                              <h5 className="text-lg font-bold uppercase tracking-wide">ใบกำกับภาษี / ใบเสร็จรับเงิน</h5>
+                              <p className="text-[10px] font-bold text-gray-500">TAX INVOICE / RECEIPT</p>
+                              
+                              <div className="border border-gray-300 p-1.5 rounded text-center bg-gray-50 my-2">
+                                  <p className="text-xs font-bold">{invoiceType === 'original' ? 'ต้นฉบับ / Original' : 'สำเนา / Copy'}</p>
                               </div>
-                              <div className="grid grid-cols-2 gap-2 text-xs mt-2">
-                                  <div className="text-right font-bold">เลขที่ / No.:</div>
-                                  <div className="text-right">{selectedInvoice.invNo}</div>
-                                  <div className="text-right font-bold">วันที่ / Date:</div>
-                                  <div className="text-right">{safeDate(selectedInvoice.date)}</div>
-                                  <div className="text-right font-bold">อ้างอิง / Ref.:</div>
-                                  <div className="text-right">{selectedInvoice.abbNo}</div>
+
+                              <div className="flex flex-col gap-0.5 text-[10px] mt-2">
+                                  <div className="flex justify-between">
+                                      <span className="font-bold text-gray-600">เลขที่ / No.:</span>
+                                      <span className="font-bold">{selectedInvoice.invNo}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                      <span className="font-bold text-gray-600">วันที่ / Date:</span>
+                                      <span className="font-bold">{safeDate(selectedInvoice.date)}</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                      <span className="font-bold text-gray-600">อ้างอิง / Ref.:</span>
+                                      <span className="font-bold">{selectedInvoice.abbNo}</span>
+                                  </div>
                               </div>
                            </div>
                       </div>
