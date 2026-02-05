@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, initializeFirestore, collection, doc, setDoc, addDoc, onSnapshot, query, getDoc, updateDoc, deleteDoc
+  getFirestore, initializeFirestore, collection, doc, setDoc, addDoc, onSnapshot, query, getDoc, updateDoc, deleteDoc,
+  orderBy, limit
 } from 'firebase/firestore';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { 
@@ -20,32 +21,36 @@ import {
   ClipboardList,
   UserSearch,
   Eye,
-  CloudCog
+  CloudCog,
+  ToggleLeft,
+  ToggleRight,
+  AlertTriangle
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDf0rpBqefYiKXOvALDd3xpyONGHRkgr6g",
-  authDomain: "eats-and-use-management-system.firebaseapp.com",
-  projectId: "eats-and-use-management-system",
-  storageBucket: "eats-and-use-management-system.firebasestorage.app",
-  messagingSenderId: "742592710018",
-  appId: "1:742592710018:web:973c5d172717c3fb443b9b",
-  measurementId: "G-R7PN5DSFWS"
+  apiKey: "AIzaSyAhVwzAENOTpyNTohAJMJMIXo_yTuANdlo",
+  authDomain: "eats-and-use-pro-analytics-pos.firebaseapp.com",
+  projectId: "eats-and-use-pro-analytics-pos",
+  storageBucket: "eats-and-use-pro-analytics-pos.firebasestorage.app",
+  messagingSenderId: "832797285616",
+  appId: "1:832797285616:web:91013603d7c8891518f635",
+  measurementId: "G-NN4T32GXZL"
 };
 
 const app = initializeApp(firebaseConfig);
 
 // แก้ไข: ใช้ initializeFirestore พร้อม options เพื่อแก้ปัญหา Offline ใน StackBlitz
 const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true, // บังคับใช้ Long Polling เพื่อความเสถียร
+  experimentalForceLongPolling: true, 
 });
 
 const auth = getAuth(app);
 
-// --- App ID Configuration ---
-// แก้ไข App ID ให้ตรงกับชื่อร้าน
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'eats-and-use-pos';
+// --- Helper: Get Thai Date (YYYY-MM-DD) ---
+const getThaiDate = () => {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
+};
 
 // --- Constants ---
 const FMCG_CONFIG = {
@@ -103,8 +108,8 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
   );
 };
 
-const Sidebar = ({ currentView, setView }) => (
-  <aside className="w-64 bg-[#F5F0E6] flex flex-col h-full border-r border-[#D7BA9D]/30">
+const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentAppId }) => (
+  <aside className="w-64 bg-[#F5F0E6] flex flex-col h-full border-r border-[#D7BA9D]/30 transition-all">
     <div className="p-10 flex flex-col items-center text-center">
       <div className="w-16 h-16 bg-[#B3543D] rounded-full flex items-center justify-center text-white mb-4 shadow-lg shadow-[#B3543D]/20"><Leaf size={32} /></div>
       <h1 className="text-xl font-bold text-[#433D3C]">eats and use</h1>
@@ -123,13 +128,26 @@ const Sidebar = ({ currentView, setView }) => (
         </button>
       ))}
     </nav>
-    <div className="p-6 text-center">
-      <div className="bg-[#E8E1D5] rounded-xl p-3 border border-[#D7BA9D]/30">
+    <div className="p-6 text-center space-y-3">
+      <button 
+        onClick={handleToggleMode}
+        className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-xs font-bold transition-all border shadow-sm hover:scale-[1.02] active:scale-95 ${isDevMode ? 'bg-red-50 border-red-200 text-red-600' : 'bg-green-50 border-green-200 text-green-700'}`}
+      >
+        <div className="flex flex-col text-left">
+            <span className="text-[10px] opacity-70">CURRENT MODE</span>
+            <span>{isDevMode ? 'TEST MODE (Dev)' : 'PRODUCTION'}</span>
+        </div>
+        {isDevMode ? <ToggleLeft size={24}/> : <ToggleRight size={24}/>}
+      </button>
+
+      <div className={`bg-[#E8E1D5] rounded-xl p-3 border border-[#D7BA9D]/30 transition-all ${isDevMode ? 'opacity-100' : 'opacity-60'}`}>
          <div className="flex items-center justify-center gap-2 text-[#433D3C] font-bold text-xs mb-1">
             <CloudCog size={14} className="text-[#B3543D]"/>
-            <span>App ID: {appId.slice(0,8)}...</span>
+            <span>DB: {currentAppId.slice(0,12)}...</span>
          </div>
-         <p className="text-[9px] text-[#8B8A73] uppercase tracking-widest">Cloud Connected</p>
+         <p className={`text-[9px] font-bold uppercase tracking-widest ${isDevMode ? 'text-red-500' : 'text-[#606C38]'}`}>
+            {isDevMode ? 'Connected to Dev' : 'Connected to Prod'}
+         </p>
       </div>
     </div>
   </aside>
@@ -202,6 +220,26 @@ const App = () => {
   const [crmTypeFilter, setCrmTypeFilter] = useState('all'); 
   const [selectedProductId, setSelectedProductId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [authStatus, setAuthStatus] = useState('loading');
+  const [authErrorMessage, setAuthErrorMessage] = useState('');
+
+  // Mode State (with localStorage persistence)
+  const [isDevMode, setIsDevMode] = useState(() => {
+    try {
+        const saved = localStorage.getItem('isDevMode');
+        return saved === 'true'; // Default to false if null
+    } catch { return false; }
+  });
+
+  // Toggle Handler
+  const handleToggleMode = () => {
+    const newMode = !isDevMode;
+    setIsDevMode(newMode);
+    localStorage.setItem('isDevMode', String(newMode));
+  };
+
+  // Derived App ID (No spaces for safety)
+  const appId = isDevMode ? 'dev-test' : 'eats-and-use-2026';
 
   // Data States
   const [shopInfo, setShopInfo] = useState({
@@ -242,7 +280,7 @@ const App = () => {
     name: '', sku: '', category: 'เครื่องดื่ม', subCategory: '', brand: '', uom: 'ชิ้น', size: '', price: 0, minStock: 5 
   });
   const [newStock, setNewStock] = useState({ 
-    productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: new Date().toISOString().split('T')[0],
+    productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: getThaiDate(),
     vendor: '', taxId: '', branch: '00000', includeVat: true, contactId: ''
   });
   const [newContact, setNewContact] = useState({ name: '', taxId: '', branch: '00000', email: '', phone: '', address: '', type: 'customer' });
@@ -356,7 +394,7 @@ const App = () => {
         taxId: newStock.taxId || '-', branch: newStock.branch || '00000', taxType: 'เต็มรูปแบบ', desc: `รับเข้าล็อต ${newStock.lotNo}`
       });
       setStockModalOpen(false);
-      setNewStock({ productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: new Date().toISOString().split('T')[0], vendor: '', taxId: '', branch: '00000', includeVat: true, contactId: '' });
+      setNewStock({ productId: '', cost: 0, qty: 0, lotNo: '', receiveDate: getThaiDate(), vendor: '', taxId: '', branch: '00000', includeVat: true, contactId: '' });
     } catch (err) { console.error(err); }
   };
 
@@ -386,7 +424,7 @@ const App = () => {
       const transColl = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
       const receiptId = `TX-${Date.now().toString().slice(-6)}`;
       await setDoc(doc(transColl, receiptId), {
-        date: new Date().toISOString().split('T')[0],
+        date: getThaiDate(),
         type: 'income', category: 'ขายสินค้า', channel: salesChannel,
         amount: totalItemsPrice, fee: Number(manualFeeAmount), shippingIncome: Number(shippingIncome), shippingCost: Number(actualShippingCost),
         discount: Number(discountAmount), vat: currentVat,
@@ -451,14 +489,16 @@ const App = () => {
     document.head.appendChild(script);
     const initAuth = async () => {
       try {
-        // Fix: Removed signInWithCustomToken because it causes mismatch when using custom firebaseConfig
-        // with the environment's token. Always use Anonymous for this setup.
-        await signInAnonymously(auth); 
+        await signInAnonymously(auth);
+        setAuthStatus('success');
       } catch (err) { 
         console.error("Auth error", err); 
+        setAuthStatus('error');
         // Show specific alert for configuration-not-found error
         if (err.code === 'auth/configuration-not-found' || err.code === 'auth/admin-restricted-operation') {
-            alert("Connection Error: กรุณาเปิดใช้งาน 'Anonymous' (ไม่ระบุตัวตน) ใน Firebase Console -> Authentication -> Sign-in method ก่อนใช้งาน");
+            setAuthErrorMessage("กรุณาเปิดใช้งาน 'Anonymous' (ไม่ระบุตัวตน) ใน Firebase Console");
+        } else {
+            setAuthErrorMessage(err.message || 'Authentication Failed');
         }
       }
     };
@@ -467,20 +507,32 @@ const App = () => {
     return () => unsubscribeAuth();
   }, []);
 
-  // --- NEW: Safety Timeout to prevent infinite loading ---
+  // --- NEW: Safety Timeout to prevent infinite loading (Triggered by loading state) ---
   useEffect(() => {
-    // Force stop loading after 8 seconds (Safety net)
-    const safetyTimer = setTimeout(() => {
-        setLoading(false);
-    }, 8000);
+    let safetyTimer;
+    if (loading) {
+        // Force stop loading after 8 seconds (Safety net)
+        safetyTimer = setTimeout(() => {
+            setLoading(false);
+        }, 8000);
+    }
     return () => clearTimeout(safetyTimer);
-  }, []);
+  }, [loading]);
 
   useEffect(() => {
     if (!user) return;
+    setLoading(true); // Show loading when switching modes
+    // Clear data when switching modes to avoid stale data
+    setProducts([]); setLots([]); setContacts([]); setTransactions([]); 
+
     const publicPath = (coll) => collection(db, 'artifacts', appId, 'public', 'data', coll);
     const shopDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'shopInfo');
-    getDoc(shopDocRef).then((snap) => { if (snap.exists()) setShopInfo(snap.data()); });
+    
+    // FIX: Switched to onSnapshot for Real-time Shop Info updates
+    const unsubShop = onSnapshot(shopDocRef, 
+        (snap) => { if (snap.exists()) setShopInfo(snap.data()); },
+        (err) => console.warn("Shop info snapshot error:", err)
+    );
     
     // Add error callbacks to snapshot listeners
     const unsubProducts = onSnapshot(publicPath('products'), 
@@ -499,13 +551,16 @@ const App = () => {
       (snap) => setContacts(snap.docs.map(d => ({ ...d.data(), id: d.id }))), 
       (err) => console.error("Contacts snapshot error:", err)
     );
-    const unsubTrans = onSnapshot(publicPath('transactions'), 
-      (snap) => { setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date))); }, 
+    
+    // Optimized Transactions Query (Limit 100 & Server-side Sort)
+    const transactionsQuery = query(publicPath('transactions'), orderBy('date', 'desc'), limit(100));
+    const unsubTrans = onSnapshot(transactionsQuery, 
+      (snap) => { setTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id }))); }, 
       (err) => console.error("Transactions snapshot error:", err)
     );
     
-    return () => { unsubProducts(); unsubLots(); unsubContacts(); unsubTrans(); };
-  }, [user]);
+    return () => { unsubShop(); unsubProducts(); unsubLots(); unsubContacts(); unsubTrans(); };
+  }, [user, appId]); // Added appId to dependency array
 
   useEffect(() => {
     if (isProductModalOpen && newProduct.category) {
@@ -527,9 +582,37 @@ const App = () => {
     );
   }
 
+  // --- Auth Error State UI ---
+  if (authStatus === 'error') {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-red-50 text-red-800 p-8 text-center">
+          <AlertTriangle size={64} className="mb-4 text-red-500" />
+          <h2 className="text-2xl font-bold mb-2">Authentication Failed</h2>
+          <p className="text-sm mb-6">{authErrorMessage}</p>
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-100 max-w-md text-left text-sm text-gray-600 space-y-2">
+             <p className="font-bold text-red-700">วิธีแก้ไข (Solution):</p>
+             <ol className="list-decimal list-inside space-y-1">
+                <li>ไปที่ <strong>Firebase Console</strong></li>
+                <li>เลือกโปรเจกต์ <strong>eats-and-use-pro-analytics-pos</strong></li>
+                <li>ไปที่เมนู <strong>Build {'>'} Authentication</strong></li>
+                <li>คลิกแท็บ <strong>Sign-in method</strong></li>
+                <li>เปิดใช้งาน <strong>Anonymous</strong> (Enable)</li>
+             </ol>
+          </div>
+          <button onClick={() => window.location.reload()} className="mt-8 px-6 py-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition-colors">ลองใหม่อีกครั้ง (Retry)</button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-[#FDFCF8] text-[#433D3C] overflow-hidden" style={{ fontFamily: "'Noto Sans Thai', sans-serif" }}>
-      <Sidebar currentView={view} setView={setView} />
+      <Sidebar 
+        currentView={view} 
+        setView={setView} 
+        isDevMode={isDevMode} 
+        handleToggleMode={handleToggleMode}
+        currentAppId={appId}
+      />
 
       <main className="flex-1 flex flex-col min-w-0">
         <header className="h-20 bg-white/40 backdrop-blur-md border-b border-[#D7BA9D]/20 flex items-center justify-between px-10">
@@ -708,7 +791,7 @@ const App = () => {
                     <div key={c.id} className="bg-white p-8 rounded-[40px] border border-[#D7BA9D]/20 shadow-sm group hover:border-[#B3543D]/50 transition-all text-[#433D3C]">
                        <div className="flex justify-between items-start mb-6">
                           <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${c.type === 'customer' ? 'bg-blue-50 text-blue-500' : 'bg-orange-50 text-orange-500'}`}><Users size={24}/></div>
-                          <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${c.type === 'customer' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{c.type}</span>
+                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${c.type === 'customer' ? 'bg-blue-50 text-blue-600' : 'bg-orange-50 text-orange-600'}`}>{c.type}</span>
                        </div>
                        <h4 className="text-lg font-black mb-1">{c.name}</h4>
                        <p className="text-xs text-[#8B8A73] mb-4">{c.address || 'ไม่ระบุที่อยู่'}</p>
