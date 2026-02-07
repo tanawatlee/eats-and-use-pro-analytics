@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
   getFirestore, initializeFirestore, collection, doc, setDoc, addDoc, onSnapshot, query, getDoc, updateDoc, deleteDoc,
@@ -15,7 +15,8 @@ import {
   TrendingUp, TrendingDown, Target, Award, ShoppingBag,
   Zap, Calendar, BarChart3, PieChart, Users2, LayoutGrid, Receipt,
   Calculator, Tag, ShieldCheck, Info, Percent, Hash, Printer, FileText,
-  MoreVertical, CheckCircle2, Building2, FileCheck, Copy
+  MoreVertical, CheckCircle2, Building2, FileCheck, Copy,
+  ImagePlus, Wand2, ScanBarcode, UploadCloud
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -374,6 +375,7 @@ const App = () => {
   const [salesChannel, setSalesChannel] = useState('Offline');
   const [orderId, setOrderId] = useState(''); // Platform Order ID
   const [discountAmount, setDiscountAmount] = useState(''); 
+  const [cashCoupon, setCashCoupon] = useState(''); // Added Cash Coupon State
   const [shippingIncome, setShippingIncome] = useState(''); // เก็บลูกค้า
   const [actualShippingCost, setActualShippingCost] = useState(''); // ต้นทุนขนส่งจริง
   const [platformFee, setPlatformFee] = useState(''); // ค่าธรรมเนียมรวม
@@ -404,36 +406,69 @@ const App = () => {
   const [invoiceType, setInvoiceType] = useState('original'); // 'original' | 'copy'
 
   // Form States
-  const [newProduct, setNewProduct] = useState({ name: '', sku: '', category: 'เครื่องดื่ม', brand: '', uom: 'ชิ้น', price: 0, minStock: 5 });
-  const [newStock, setNewStock] = useState({ lotNo: '', receiveDate: getThaiDate(), vendor: '', taxId: '', items: [], discount: 0, includeVat: true });
+  const [newProduct, setNewProduct] = useState({ 
+    name: '', sku: '', category: 'เครื่องดื่ม', brand: '', uom: 'ชิ้น', 
+    price: '', cost: '', minStock: 5, barcode: '', image: null 
+  });
+  const [newStock, setNewStock] = useState({ lotNo: '', receiveDate: getThaiDate(), vendor: '', taxId: '', items: [], discount: 0, voucher: 0, includeVat: true });
   const [stockItemInput, setStockItemInput] = useState({ productId: '', qty: '', cost: '' });
   const [newContact, setNewContact] = useState({ name: '', taxId: '', branch: '00000', email: '', phone: '', address: '', type: 'customer' });
   const [newExpense, setNewExpense] = useState({ date: getThaiDate(), category: 'อุปกรณ์แพ็คของ', amount: '', note: '', vendor: '', vendorId: '', discount: '', adjustments: '' });
 
+  const fileInputRef = useRef(null);
+
   // --- Calculations (Memoized) ---
   const derivedValues = useMemo(() => {
-    const subtotal = cart?.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 0)), 0) || 0;
+    const totalProductPrice = cart?.reduce((sum, item) => sum + (Number(item.price || 0) * Number(item.qty || 0)), 0) || 0;
+    const discount = Number(discountAmount || 0);
+    const shipping = Number(shippingIncome || 0);
+    const coupon = Number(cashCoupon || 0);
+    const platform = Number(platformFee || 0);
+    const actualShip = Number(actualShippingCost || 0);
+    const adjust = Number(posAdjustment || 0);
     
-    // คำนวณ VAT (7%)
-    let vatAmount = 0;
-    let totalAfterVat = subtotal;
+    // Price base for VAT calculation (usually after trade discount)
+    const priceAfterDiscount = Math.max(0, totalProductPrice - discount);
 
+    let vat = 0;
+    let beforeVat = 0;
+    let totalWithVat = 0;
+    
     if (posVatType === 'exclude') {
-        vatAmount = subtotal * 0.07;
-        totalAfterVat = subtotal + vatAmount;
+         beforeVat = priceAfterDiscount;
+         vat = priceAfterDiscount * 0.07;
+         totalWithVat = priceAfterDiscount + vat;
     } else if (posVatType === 'include') {
-        vatAmount = subtotal - (subtotal / 1.07);
-        totalAfterVat = subtotal; 
+         beforeVat = priceAfterDiscount / 1.07;
+         vat = priceAfterDiscount - beforeVat;
+         totalWithVat = priceAfterDiscount;
+    } else {
+         beforeVat = priceAfterDiscount;
+         vat = 0;
+         totalWithVat = priceAfterDiscount;
     }
 
-    // ยอดรวมบิล (ที่ลูกค้าต้องจ่ายจริง)
-    const totalBill = totalAfterVat + Number(shippingIncome || 0) - Number(discountAmount || 0);
+    // New Formula: Grand Total = (Product +/- VAT - Discount) + Shipping Charged - Platform Fee - Actual Ship Cost
+    const grandTotal = Math.max(0, totalWithVat + shipping - platform - actualShip);
+    const netPayable = Math.max(0, grandTotal - coupon);
     
-    // รายรับสุทธิ (Payout)
-    const finalPayout = totalBill - Number(platformFee || 0) - Number(actualShippingCost || 0) + Number(posAdjustment || 0);
+    // Final Payout logic adjustment
+    const finalPayout = netPayable + adjust;
     
-    return { subtotal, vatAmount, totalBill, finalPayout };
-  }, [cart, discountAmount, shippingIncome, platformFee, actualShippingCost, posAdjustment, posVatType]);
+    return { 
+        totalProductPrice, 
+        discount, 
+        priceAfterDiscount, 
+        beforeVat, 
+        vat, 
+        totalWithVat,
+        shipping, 
+        grandTotal, 
+        coupon, 
+        netPayable, 
+        finalPayout 
+    };
+  }, [cart, discountAmount, shippingIncome, platformFee, actualShippingCost, posAdjustment, posVatType, cashCoupon]);
 
   const inventorySummary = useMemo(() => {
     if (!products) return [];
@@ -508,8 +543,51 @@ const App = () => {
       const productColl = collection(db, 'artifacts', appId, 'public', 'data', 'products');
       await addDoc(productColl, { ...newProduct, createdAt: new Date().toISOString() });
       setProductModalOpen(false);
-      setNewProduct({ name: '', sku: '', category: 'เครื่องดื่ม', brand: '', uom: 'ชิ้น', price: 0, minStock: 5 });
+      setNewProduct({ name: '', sku: '', category: 'เครื่องดื่ม', brand: '', uom: 'ชิ้น', price: '', cost: '', minStock: 5, barcode: '', image: null });
     } catch (err) { console.error(err); }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 1048576) { // 1MB limit check
+          alert("ไฟล์รูปภาพต้องมีขนาดไม่เกิน 1MB");
+          return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setNewProduct(prev => ({ ...prev, image: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const generateAutoSKU = () => {
+    // Map categories to concise prefixes for better inventory management
+    const categoryPrefixMap = {
+        'เครื่องดื่ม': 'DRK',
+        'อาหารแห้ง / ขนม': 'FD',
+        'นมและผลิตภัณฑ์แช่เย็น': 'DRY',
+        'อาหารแช่แข็ง': 'FRZ',
+        'ของใช้ส่วนตัว': 'PER',
+        'ของใช้ในบ้าน / ทำความสะอาด': 'HSE',
+        'แม่และเด็ก': 'BABY',
+        'สุขภาพและยา': 'HLTH',
+        'สัตว์เลี้ยง': 'PET',
+        'อื่นๆ': 'GEN'
+    };
+
+    // Default to 'PD' if category not found in map
+    const prefix = categoryPrefixMap[newProduct.category] || 'PD';
+    
+    // Generate a more unique random number
+    const random = Math.floor(10000 + Math.random() * 90000);
+    
+    // Use timestamp tail for order
+    const timestamp = Date.now().toString().slice(-4);
+    
+    const sku = `${prefix}-${random}-${timestamp}`;
+    setNewProduct(prev => ({ ...prev, sku }));
   };
 
   const handleSaveContact = async (e) => {
@@ -586,6 +664,45 @@ const App = () => {
       } catch (e) { console.error(e); }
   };
 
+  const handleExportContacts = () => {
+    const filteredContacts = contacts.filter(c => (crmTypeFilter === 'all' || c.type === crmTypeFilter) && ((safeStr(c.name)).toLowerCase().includes(searchTerm.toLowerCase())));
+    
+    if (filteredContacts.length === 0) {
+        alert("ไม่พบข้อมูลที่จะส่งออก");
+        return;
+    }
+
+    // CSV Header (ภาษาไทย)
+    const headers = ["ชื่อ (Name)", "ประเภท (Type)", "เลขผู้เสียภาษี (Tax ID)", "สาขา (Branch)", "เบอร์โทร (Phone)", "อีเมล (Email)", "ที่อยู่ (Address)"];
+    
+    // Map data to rows
+    const rows = filteredContacts.map(c => [
+        `"${safeStr(c.name).replace(/"/g, '""')}"`, // Escape quotes
+        c.type === 'customer' ? 'ลูกค้า' : 'คู่ค้า',
+        safeStr(c.taxId) ? `'${c.taxId}` : '-', // Force Excel to treat as string
+        safeStr(c.branch),
+        safeStr(c.phone),
+        safeStr(c.email),
+        `"${safeStr(c.address).replace(/"/g, '""')}"`
+    ]);
+
+    // Combine headers and rows
+    const csvContent = [
+        headers.join(","),
+        ...rows.map(r => r.join(","))
+    ].join("\n");
+
+    // Create Blob with BOM for Thai support in Excel
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `crm_contacts_${getThaiDate()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const addToCart = (product) => {
     const info = inventorySummary.find(i => i.id === product.id);
     if (!info || info.remaining <= 0) return;
@@ -612,11 +729,15 @@ const App = () => {
         orderId: orderId,
         abbNo: abbNo, // ใบกำกับภาษีอย่างย่อ (Ref ID)
         amount: derivedValues.finalPayout, 
-        subtotal: derivedValues.subtotal,
+        subtotal: derivedValues.totalProductPrice,
+        priceAfterDiscount: derivedValues.priceAfterDiscount,
+        beforeVat: derivedValues.beforeVat,
         vatType: posVatType,
-        vatAmount: derivedValues.vatAmount,
-        totalBill: derivedValues.totalBill,
+        vatAmount: derivedValues.vat,
+        grandTotal: derivedValues.grandTotal, // ยอดก่อนหักคูปอง
+        totalBill: derivedValues.netPayable, // ยอดชำระจริง (Customer Paid)
         discount: Number(discountAmount || 0),
+        cashCoupon: Number(cashCoupon || 0), // Save Coupon Data
         shippingIncome: Number(shippingIncome || 0),
         actualShippingCost: Number(actualShippingCost || 0),
         platformFee: Number(platformFee || 0),
@@ -631,7 +752,7 @@ const App = () => {
       setReceiptModalOpen(true);
 
       // Reset
-      setCart([]); setShippingIncome(''); setDiscountAmount(''); setPlatformFee(''); 
+      setCart([]); setShippingIncome(''); setDiscountAmount(''); setPlatformFee(''); setCashCoupon('');
       setActualShippingCost(''); setPosAdjustment(''); setPosVatType('none'); 
       setOrderId(''); setIsFullTax(false);
     } catch (err) { console.error(err); }
@@ -665,14 +786,24 @@ const App = () => {
     try {
       const tColl = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
       const lColl = collection(db, 'artifacts', appId, 'public', 'data', 'lots');
-      const totalCost = newStock.items.reduce((s, i) => s + (i.qty * i.cost), 0);
       
+      const subtotal = newStock.items.reduce((s, i) => s + (i.cost * i.qty), 0);
+      const discount = Number(newStock.discount) || 0;
+      const voucher = Number(newStock.voucher) || 0;
+      const totalValue = subtotal - discount; // Cost basis for inventory/VAT (Net Total)
+      const cashPayment = totalValue - voucher; // Actual money paid
+
       await addDoc(tColl, { 
         date: newStock.receiveDate, 
         type: 'expense', 
         category: 'ซื้อสินค้าเข้าสต็อก',
-        amount: totalCost - (Number(newStock.discount) || 0), 
-        customer: safeStr(newStock.vendor) || 'ไม่ระบุ'
+        amount: cashPayment, // บันทึกยอดจ่ายจริงเป็นค่าใช้จ่าย (Cash Flow)
+        baseAmount: subtotal,
+        discount: discount,
+        voucherAmount: voucher,
+        totalStockValue: totalValue, // บันทึกมูลค่าสต็อกรวมหลังหักส่วนลดการค้า
+        customer: safeStr(newStock.vendor) || 'ไม่ระบุ',
+        note: `Stock In: ${newStock.items.length} items. (Voucher Used: ${voucher})`
       });
       
       for (const i of newStock.items) {
@@ -686,7 +817,7 @@ const App = () => {
         });
       }
       setStockModalOpen(false);
-      setNewStock({ lotNo: '', receiveDate: getThaiDate(), vendor: '', items: [], discount: 0, includeVat: true });
+      setNewStock({ lotNo: '', receiveDate: getThaiDate(), vendor: '', items: [], discount: 0, voucher: 0, includeVat: true });
     } catch (e) { console.error(e); }
   };
 
@@ -749,7 +880,13 @@ const App = () => {
                     const info = inventorySummary.find(i => i.id === product.id);
                     return (
                       <div key={product.id} onClick={() => addToCart(product)} className={`bg-white p-6 rounded-[32px] border border-[#D7BA9D]/20 hover:border-[#B3543D]/50 cursor-pointer transition-all hover:shadow-xl hover:-translate-y-1 ${info?.remaining <= 0 ? 'opacity-40 grayscale pointer-events-none' : ''}`}>
-                        <div className="w-12 h-12 bg-[#F5F0E6] rounded-2xl flex items-center justify-center text-[#B3543D] mb-5"><Box size={24} /></div>
+                        <div className="w-12 h-12 bg-[#F5F0E6] rounded-2xl flex items-center justify-center text-[#B3543D] mb-5 overflow-hidden">
+                            {product.image ? (
+                                <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                            ) : (
+                                <Box size={24} />
+                            )}
+                        </div>
                         <h4 className="font-bold text-[15px] mb-1 truncate leading-tight">{safeStr(product.name)}</h4>
                         <div className="flex justify-between items-end mt-5">
                           <span className="text-xl font-extrabold text-[#B3543D]">฿{Number(product.price || 0).toLocaleString()}</span>
@@ -860,6 +997,13 @@ const App = () => {
                                       <input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl pl-7 pr-3 py-2.5 text-[14px] font-bold text-red-500 outline-none" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} placeholder="ส่วนลดบิล" />
                                   </div>
                               </div>
+                              <div className="space-y-1.5">
+                                  <label className="text-[11px] font-bold text-[#8B8A73] ml-1">Cash Coupon</label>
+                                  <div className="relative">
+                                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-blue-300">฿</span>
+                                      <input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl pl-7 pr-3 py-2.5 text-[14px] font-bold text-blue-500 outline-none" value={cashCoupon} onChange={e => setCashCoupon(e.target.value)} placeholder="คูปองเงินสด" />
+                                  </div>
+                              </div>
                           </div>
                       </div>
 
@@ -889,14 +1033,50 @@ const App = () => {
                 </div>
 
                 <div className="p-8 bg-[#F5F0E6]/50 rounded-b-[40px] border-t border-[#F5F0E6] space-y-4 shadow-inner no-print">
-                  <div className="space-y-2">
-                      <div className="flex justify-between items-center text-[#8B8A73] text-sm font-bold">
-                        <span>Grand Total</span>
-                        <span>฿{derivedValues.totalBill.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                  <div className="space-y-3">
+                      <div className="flex justify-between items-center text-[#8B8A73] text-xs font-medium">
+                        <span>ยอดรวมสินค้า (Subtotal)</span>
+                        <span>฿{derivedValues.totalProductPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                       </div>
-                      <div className="flex justify-between items-center">
-                        <span className="text-[15px] font-black text-[#433D3C] flex items-center gap-2 uppercase tracking-tighter">Net Payout <ShieldCheck size={16} className="text-green-600"/></span>
-                        <span className="text-3xl font-black text-[#B3543D]">฿{derivedValues.finalPayout.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      {derivedValues.discount > 0 && (
+                        <div className="flex justify-between items-center text-red-500 text-xs font-medium">
+                            <span>ส่วนลด (Discount)</span>
+                            <span>-฿{derivedValues.discount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+                      {derivedValues.shipping > 0 && (
+                        <div className="flex justify-between items-center text-[#8B8A73] text-xs font-medium">
+                            <span>ค่าขนส่ง (Shipping)</span>
+                            <span>฿{derivedValues.shipping.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
+
+                      <div className="border-t border-dashed border-[#D7BA9D]/50 my-2 pt-2 space-y-1">
+                          <div className="flex justify-between items-center text-[#8B8A73] text-[10px]">
+                            <span>ราคาก่อนภาษี (Before VAT)</span>
+                            <span>฿{derivedValues.beforeVat.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-[#8B8A73] text-[10px]">
+                            <span>ภาษีมูลค่าเพิ่ม (VAT 7%)</span>
+                            <span>฿{derivedValues.vat.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </div>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[#433D3C] text-sm font-bold border-t border-[#F5F0E6] pt-2">
+                        <span>ยอดรวมทั้งสิ้น (Grand Total)</span>
+                        <span>฿{derivedValues.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      </div>
+                      
+                      {derivedValues.coupon > 0 && (
+                          <div className="flex justify-between items-center text-blue-500 text-sm font-bold">
+                            <span className="flex items-center gap-1"><Tag size={12}/> หักคูปอง (Coupon)</span>
+                            <span>-฿{derivedValues.coupon.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                          </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-2">
+                        <span className="text-[16px] font-black text-[#433D3C] flex items-center gap-2 uppercase tracking-tighter">Net Payable <CheckCircle2 size={18} className="text-green-600"/></span>
+                        <span className="text-3xl font-black text-[#B3543D]">฿{derivedValues.netPayable.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                       </div>
                   </div>
                   <button onClick={handleCheckout} disabled={cart?.length === 0} className="w-full bg-[#B3543D] text-white py-5 rounded-[24px] text-lg font-extrabold shadow-xl hover:bg-[#963F2C] transition-all disabled:opacity-50">ยืนยันรายการขาย</button>
@@ -907,21 +1087,27 @@ const App = () => {
 
           {view === 'contacts' && (
             <div className="w-full space-y-10 animate-in fade-in duration-300 text-[#433D3C]">
+                {/* ... existing contacts code ... */}
                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-6">
                     <div className="space-y-2">
                         <h3 className="text-3xl font-black tracking-tight">ฐานข้อมูล CRM Pro</h3>
                         <p className="text-[15px] text-[#8B8A73] font-medium leading-relaxed">วิเคราะห์พฤติกรรมการซื้อและบริหารความสัมพันธ์รายบุคคลอย่างมืออาชีพ</p>
                     </div>
-                    <div className="flex items-center gap-2 bg-[#F5F0E6] p-1.5 rounded-2xl w-fit shadow-inner">
-                        {[
-                            { id: 'all', label: 'ทั้งหมด' },
-                            { id: 'customer', label: 'ลูกค้า' },
-                            { id: 'vendor', label: 'คู่ค้า' }
-                        ].map(t => (
-                            <button key={t.id} onClick={() => setCrmTypeFilter(t.id)} className={`px-6 py-2.5 rounded-xl text-sm font-extrabold transition-all ${crmTypeFilter === t.id ? 'bg-white text-[#B3543D] shadow-md' : 'text-[#8B8A73] hover:text-[#433D3C]'}`}>
-                                {t.label}
-                            </button>
-                        ))}
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 bg-[#F5F0E6] p-1 rounded-xl w-fit shadow-inner">
+                          {[
+                              { id: 'all', label: 'ทั้งหมด' },
+                              { id: 'customer', label: 'ลูกค้า' },
+                              { id: 'vendor', label: 'คู่ค้า' }
+                          ].map(t => (
+                              <button key={t.id} onClick={() => setCrmTypeFilter(t.id)} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${crmTypeFilter === t.id ? 'bg-white text-[#B3543D] shadow-sm' : 'text-[#8B8A73] hover:text-[#433D3C]'}`}>
+                                  {t.label}
+                              </button>
+                          ))}
+                      </div>
+                      <button onClick={handleExportContacts} className="px-3 py-2 rounded-lg text-xs font-bold transition-all bg-[#433D3C] text-white hover:bg-[#2A2A2A] shadow-md flex items-center gap-1.5">
+                          <FileSpreadsheet size={14}/> Export
+                      </button>
                     </div>
                 </div>
 
@@ -972,6 +1158,7 @@ const App = () => {
           )}
 
           {view === 'reports' && (
+            // ... existing reports code ...
             <div className="w-full space-y-12 animate-in fade-in duration-300 text-[#433D3C]">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-6">
                     <div className="space-y-2">
@@ -1107,6 +1294,7 @@ const App = () => {
           )}
 
           {view === 'inventory' && (
+            // ... existing inventory code ...
             <div className="w-full space-y-8 animate-in fade-in duration-300 text-[#433D3C]">
                <div className="flex justify-between items-center no-print">
                  <div className="flex items-center gap-4">
@@ -1253,6 +1441,7 @@ const App = () => {
       <Modal isOpen={isFullInvoicePreviewOpen} onClose={() => setFullInvoicePreviewOpen(false)} title="ใบกำกับภาษีเต็มรูป (Full Tax Invoice)" maxWidth="max-w-3xl">
           {selectedInvoice && (
               <div className="bg-white p-8 text-[#333] font-mono-receipt border border-gray-200 shadow-lg relative min-h-[800px] flex flex-col justify-between invoice-preview-container">
+                  {/* ... existing full tax invoice code ... */}
                   {/* Header / Actions */}
                   <div className="absolute top-4 right-4 no-print flex gap-2 z-10">
                       <button 
@@ -1274,7 +1463,7 @@ const App = () => {
                       {/* 1. Header: Title & Copy Type */}
                       <div className="flex justify-between items-start">
                            {/* Company Info */}
-                           <div className="w-[60%] space-y-1">
+                           <div className="w-[60%] space-y-1 text-left">
                               <div className="flex items-center gap-3 mb-2">
                                   <div className="w-10 h-10 bg-[#B3543D] rounded-full flex items-center justify-center text-white"><Leaf size={20} /></div>
                                   <h4 className="text-xl font-bold text-[#B3543D]">บริษัท อีทส์ แอนด์ ยูส โปร จำกัด</h4>
@@ -1314,8 +1503,8 @@ const App = () => {
                       <hr className="border-gray-300 my-4"/>
 
                       {/* 2. Customer Section */}
-                      <div className="border border-gray-300 rounded p-4 flex justify-between items-start">
-                          <div className="w-full">
+                      <div className="border border-gray-300 rounded p-4 flex justify-between items-start text-left">
+                          <div className="w-full text-left">
                               <p className="text-xs font-bold text-gray-500 uppercase mb-1">ลูกค้า / Customer</p>
                               <p className="text-sm font-bold mb-1">{selectedInvoice.fullTaxCustomer}</p>
                               <p className="text-xs mb-1">{selectedInvoice.fullTaxAddress}</p>
@@ -1362,8 +1551,8 @@ const App = () => {
                           {/* Left: Text Amount & Note */}
                           <div className="flex-1 space-y-4">
                               <div className="border border-gray-300 rounded bg-gray-50 p-3 text-center">
-                                  <span className="text-xs font-bold text-gray-500 mr-2">จำนวนเงินตัวอักษร (Baht Text):</span>
-                                  <span className="font-bold text-[#B3543D] text-sm">({ThaiBahtText(selectedInvoice.totalBill)})</span>
+                                  <div className="text-xs font-bold text-gray-500 mb-1">จำนวนเงินตัวอักษร (Baht Text):</div>
+                                  <div className="font-bold text-[#B3543D] text-sm">({ThaiBahtText(selectedInvoice.totalBill)})</div>
                               </div>
                               <div className="text-xs text-gray-500">
                                   <p><span className="font-bold">หมายเหตุ:</span> เอกสารนี้จัดทำโดยระบบคอมพิวเตอร์</p>
@@ -1394,7 +1583,7 @@ const App = () => {
                               </div>
                               <div className="flex justify-between py-1 border-b border-gray-200">
                                   <span>ภาษีมูลค่าเพิ่ม 7% (VAT)</span>
-                                  <span>{(selectedInvoice.vatAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                                  <span>{(selectedInvoice.vatAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                               </div>
                               <div className="flex justify-between py-2 border-b border-gray-300 text-base font-bold bg-gray-100 px-2 mt-1">
                                   <span>จำนวนเงินทั้งสิ้น (Grand Total)</span>
@@ -1434,6 +1623,7 @@ const App = () => {
       <Modal isOpen={isFullTaxConverterOpen} onClose={() => { setFullTaxConverterOpen(false); setFullTaxData(null); }} title="ออกใบกำกับภาษีเต็มรูป (Convert ABB to Full Invoice)">
           {fullTaxData && (
               <div className="space-y-6 text-left">
+                  {/* ... existing full tax converter code ... */}
                   <div className="bg-[#FDFCF8] p-5 rounded-2xl border border-[#F5F0E6] space-y-2">
                       <p className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest">Original Reference</p>
                       <div className="flex justify-between items-center">
@@ -1716,43 +1906,165 @@ const App = () => {
                 </table>
              </div>
           </div>
-          <div className="pt-6 border-t border-[#F5F0E6] flex justify-between items-center">
-             <div className="flex items-center gap-4">
-                 <span className="text-sm font-bold text-[#8B8A73] uppercase tracking-wider">Discount:</span>
-                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-4 py-2 rounded-xl border border-[#D7BA9D]/30 no-print">
+          <div className="pt-6 border-t border-[#F5F0E6] space-y-3">
+             {/* Discount Row */}
+             <div className="flex justify-between items-center">
+                 <span className="text-sm font-bold text-[#8B8A73]">ส่วนลด (Discount):</span>
+                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-3 py-1.5 rounded-xl border border-[#D7BA9D]/30">
                     <span className="text-xs font-black text-[#D7BA9D]">฿</span>
-                    <input type="number" className="w-24 outline-none text-right text-[16px] text-red-500 font-extrabold bg-transparent" value={newStock.discount} onChange={e => setNewStock({...newStock, discount: e.target.value})} />
+                    <input type="number" className="w-24 outline-none text-right text-sm font-bold bg-transparent text-red-500" value={newStock.discount} onChange={e => setNewStock({...newStock, discount: e.target.value})} />
                  </div>
              </div>
-             <div className="text-right">
-                <p className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest mb-1">Grand Total</p>
-                <p className="text-3xl font-black text-[#B3543D]">฿{Math.max(0, (newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) || 0) - Number(newStock.discount || 0)).toLocaleString()}</p>
+
+             {/* Voucher Row */}
+             <div className="flex justify-between items-center">
+                 <span className="text-sm font-bold text-[#8B8A73]">คูปองเงินสด (Voucher):</span>
+                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-3 py-1.5 rounded-xl border border-[#D7BA9D]/30">
+                    <span className="text-xs font-black text-[#D7BA9D]">฿</span>
+                    <input type="number" className="w-24 outline-none text-right text-sm font-bold bg-transparent text-blue-500" value={newStock.voucher} onChange={e => setNewStock({...newStock, voucher: e.target.value})} />
+                 </div>
+             </div>
+
+             {/* Summary */}
+             <div className="flex justify-between items-end border-t border-dashed border-[#D7BA9D]/50 pt-3">
+                <div className="text-right w-full space-y-1">
+                    <div className="flex justify-between text-xs text-[#8B8A73]">
+                        <span>ยอดรวมสินค้า (Subtotal)</span>
+                        <span>{newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-[#8B8A73]">
+                        <span>หักส่วนลดการค้า</span>
+                        <span className="text-red-500">-{Number(newStock.discount || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-bold text-[#433D3C]">
+                        <span>ยอดสุทธิ (Net Total)</span>
+                        <span>{(newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) - Number(newStock.discount || 0)).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-[#8B8A73]">
+                        <span>ชำระด้วยคูปอง</span>
+                        <span className="text-blue-500">-{Number(newStock.voucher || 0).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-lg font-black text-[#B3543D] pt-1">
+                        <span>ยอดชำระจริง (Cash Pay)</span>
+                        <span>{Math.max(0, (newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) || 0) - Number(newStock.discount || 0) - Number(newStock.voucher || 0)).toLocaleString()}</span>
+                    </div>
+                </div>
              </div>
           </div>
-          <button onClick={handleReceiveStock} className="w-full bg-[#433D3C] text-white py-5 rounded-[24px] text-lg font-black shadow-xl hover:bg-[#2A2A2A] transition-all no-print">บันทึกรับสินค้า</button>
+          <button onClick={handleReceiveStock} className="w-full bg-[#433D3C] text-white py-5 rounded-[24px] text-lg font-black shadow-xl hover:bg-[#2A2A2A] transition-all no-print mt-6">บันทึกรับสินค้า</button>
         </div>
       </Modal>
 
-      <Modal isOpen={isProductModalOpen} onClose={() => setProductModalOpen(false)} title="เพิ่มสินค้าใหม่">
-        <form onSubmit={handleAddProduct} className="space-y-6 text-left">
-           <div className="space-y-2">
-               <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">Description</label>
-               <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl px-5 py-3.5 text-[15px] font-bold outline-none focus:border-[#B3543D] transition-all" required value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} placeholder="ระบุชื่อสินค้า..." />
+      <Modal isOpen={isProductModalOpen} onClose={() => setProductModalOpen(false)} title="เพิ่มสินค้าใหม่ (Performance Mode)" maxWidth="max-w-4xl">
+        <form onSubmit={handleAddProduct} className="flex flex-col lg:flex-row gap-8 text-left">
+           {/* Left Column: Image Upload */}
+           <div className="flex-1 flex flex-col gap-4">
+               <div 
+                  className="aspect-square bg-[#FDFCF8] border-2 border-dashed border-[#D7BA9D] rounded-[32px] flex flex-col items-center justify-center cursor-pointer hover:bg-[#F5F0E6] transition-all relative overflow-hidden group"
+                  onClick={() => fileInputRef.current?.click()}
+               >
+                   {newProduct.image ? (
+                       <>
+                         <img src={newProduct.image} alt="Preview" className="w-full h-full object-cover" />
+                         <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p className="text-white font-bold flex items-center gap-2"><ImagePlus size={20}/> เปลี่ยนรูปภาพ</p>
+                         </div>
+                       </>
+                   ) : (
+                       <div className="text-center space-y-2 text-[#8B8A73]">
+                           <div className="w-16 h-16 bg-[#E8E1D5] rounded-full flex items-center justify-center mx-auto text-[#B3543D] mb-2"><UploadCloud size={32}/></div>
+                           <p className="font-bold">อัปโหลดรูปภาพสินค้า</p>
+                           <p className="text-xs opacity-70">รองรับไฟล์ PNG, JPG (Max 1MB)</p>
+                       </div>
+                   )}
+                   <input type="file" ref={fileInputRef} className="hidden" accept="image/png, image/jpeg" onChange={handleImageChange} />
+               </div>
+               
+               <div className="bg-[#F5F0E6] p-5 rounded-2xl space-y-3">
+                   <h5 className="font-bold text-sm flex items-center gap-2"><ScanBarcode size={18}/> Barcode / SKU Setup</h5>
+                   <div className="space-y-2">
+                       <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">รหัสสินค้า (SKU)</label>
+                       <div className="flex gap-2">
+                           <input type="text" className="flex-1 bg-white border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} placeholder="ระบุหรือสร้างอัตโนมัติ" />
+                           <button type="button" onClick={generateAutoSKU} className="bg-[#B3543D] text-white px-3 rounded-xl hover:bg-[#963F2C] transition-all"><Wand2 size={18}/></button>
+                       </div>
+                   </div>
+                   <div className="space-y-2">
+                       <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">บาร์โค้ด (Barcode)</label>
+                       <input type="text" className="w-full bg-white border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={newProduct.barcode} onChange={e => setNewProduct({...newProduct, barcode: e.target.value})} placeholder="สแกนบาร์โค้ด..." />
+                   </div>
+               </div>
            </div>
-           <div className="grid grid-cols-2 gap-5">
-             <div className="space-y-2">
-                 <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">Retail Price</label>
-                 <div className="flex items-center gap-3 bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl px-5 py-3.5">
-                    <span className="text-sm font-black text-[#D7BA9D]">฿</span>
-                    <input type="number" className="w-full bg-transparent text-[16px] font-extrabold outline-none" required value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} />
-                 </div>
-             </div>
-             <div className="space-y-2">
-                 <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">UOM</label>
-                 <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/20 rounded-2xl px-5 py-3.5 text-[15px] font-bold outline-none" required value={newProduct.uom} onChange={e => setNewProduct({...newProduct, uom: e.target.value})} placeholder="ขวด, กล่อง..." />
-             </div>
+
+           {/* Right Column: Details */}
+           <div className="flex-[1.5] space-y-6">
+               <div className="space-y-4">
+                   <div className="space-y-2">
+                       <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ชื่อสินค้า (Product Name)</label>
+                       <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl px-5 py-3.5 text-[16px] font-bold outline-none focus:border-[#B3543D] transition-all" required value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} placeholder="ระบุชื่อสินค้า..." />
+                   </div>
+                   
+                   <div className="grid grid-cols-2 gap-4">
+                       <div className="space-y-2">
+                           <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">หมวดหมู่</label>
+                           <select className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl px-4 py-3 text-sm font-bold outline-none" value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})}>
+                               <option value="เครื่องดื่ม">เครื่องดื่ม</option>
+                               <option value="อาหารแห้ง / ขนม">อาหารแห้ง / ขนม</option>
+                               <option value="นมและผลิตภัณฑ์แช่เย็น">นมและผลิตภัณฑ์แช่เย็น</option>
+                               <option value="อาหารแช่แข็ง">อาหารแช่แข็ง</option>
+                               <option value="ของใช้ส่วนตัว">ของใช้ส่วนตัว</option>
+                               <option value="ของใช้ในบ้าน / ทำความสะอาด">ของใช้ในบ้าน / ทำความสะอาด</option>
+                               <option value="แม่และเด็ก">แม่และเด็ก</option>
+                               <option value="สุขภาพและยา">สุขภาพและยา</option>
+                               <option value="สัตว์เลี้ยง">สัตว์เลี้ยง</option>
+                               <option value="อื่นๆ">อื่นๆ</option>
+                           </select>
+                       </div>
+                       <div className="space-y-2">
+                           <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">แบรนด์</label>
+                           <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl px-4 py-3 text-sm font-bold outline-none" value={newProduct.brand} onChange={e => setNewProduct({...newProduct, brand: e.target.value})} placeholder="ระบุแบรนด์" />
+                       </div>
+                   </div>
+               </div>
+
+               <div className="p-1 border-t border-[#F5F0E6]"></div>
+
+               <div className="space-y-4">
+                   <h5 className="font-bold text-sm text-[#433D3C]">Pricing & Inventory</h5>
+                   <div className="grid grid-cols-2 gap-5">
+                     <div className="space-y-2">
+                         <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ราคาขาย (Retail Price)</label>
+                         <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-[#D7BA9D]">฿</span>
+                            <input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl pl-8 pr-4 py-3.5 text-[18px] font-extrabold text-[#B3543D] outline-none" required value={newProduct.price} onChange={e => setNewProduct({...newProduct, price: e.target.value})} placeholder="0.00" />
+                         </div>
+                     </div>
+                     <div className="space-y-2">
+                         <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ต้นทุน (Cost)</label>
+                         <div className="relative">
+                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-[#D7BA9D]">฿</span>
+                            <input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-2xl pl-8 pr-4 py-3.5 text-[16px] font-bold text-[#433D3C] outline-none" value={newProduct.cost} onChange={e => setNewProduct({...newProduct, cost: e.target.value})} placeholder="0.00" />
+                         </div>
+                     </div>
+                   </div>
+                   <div className="grid grid-cols-2 gap-5">
+                     <div className="space-y-2">
+                         <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">หน่วยนับ (UOM)</label>
+                         <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/20 rounded-2xl px-5 py-3 text-[14px] font-bold outline-none" required value={newProduct.uom} onChange={e => setNewProduct({...newProduct, uom: e.target.value})} placeholder="ขวด, กล่อง..." />
+                     </div>
+                     <div className="space-y-2">
+                         <label className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest px-1">Min. Stock Alert</label>
+                         <input type="number" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/20 rounded-2xl px-5 py-3 text-[14px] font-bold outline-none" value={newProduct.minStock} onChange={e => setNewProduct({...newProduct, minStock: e.target.value})} />
+                     </div>
+                   </div>
+               </div>
+
+               <div className="pt-4">
+                   <button type="submit" className="w-full bg-[#B3543D] text-white py-4 rounded-[24px] text-lg font-black shadow-xl hover:bg-[#963F2C] transition-all no-print flex items-center justify-center gap-2">
+                       <CheckCircle2 size={24}/> บันทึกสินค้า
+                   </button>
+               </div>
            </div>
-           <button type="submit" className="w-full bg-[#B3543D] text-white py-5 rounded-[24px] text-lg font-black shadow-xl hover:bg-[#963F2C] transition-all mt-4 no-print">บันทึกสินค้า</button>
         </form>
       </Modal>
       
