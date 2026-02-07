@@ -16,7 +16,7 @@ import {
   Zap, Calendar, BarChart3, PieChart, Users2, LayoutGrid, Receipt,
   Calculator, Tag, ShieldCheck, Info, Percent, Hash, Printer, FileText,
   MoreVertical, CheckCircle2, Building2, FileCheck, Copy,
-  ImagePlus, Wand2, ScanBarcode, UploadCloud
+  ImagePlus, Wand2, ScanBarcode, UploadCloud, Settings
 } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -187,7 +187,7 @@ const GlobalStyles = () => (
         background: white !important; 
       }
       
-      /* Hide everything by default */
+      /* Hide everything by default but do NOT use display:none on parents */
       body * {
         visibility: hidden;
       }
@@ -209,14 +209,22 @@ const GlobalStyles = () => (
         border: none !important;
         box-shadow: none !important;
         min-height: auto !important;
-        z-index: 9999 !important;
+        z-index: 99999 !important;
         border-radius: 0 !important;
       }
 
       /* Helper classes */
       .no-print { display: none !important; }
       .print-only { display: block !important; }
-      .modal-content { box-shadow: none !important; border: none !important; max-width: 100% !important; width: 100% !important; }
+      
+      /* Reset Modal styling for print */
+      .modal-content { 
+          box-shadow: none !important; 
+          border: none !important; 
+          max-width: 100% !important; 
+          width: 100% !important;
+          position: static !important;
+      }
       
       /* Ensure colors print exactly as seen */
       * {
@@ -239,7 +247,7 @@ const channelConfig = {
 const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 no-print">
+    <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className={`bg-white rounded-[32px] w-full ${maxWidth} overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 text-[#433D3C] modal-content`}>
         <div className="p-6 border-b border-[#F5F0E6] flex justify-between items-center bg-[#FDFCF8] no-print">
           <h3 className="font-bold text-lg">{title}</h3>
@@ -252,11 +260,17 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
 };
 
 // --- Sidebar Component ---
-const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentAppId }) => (
+const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentAppId, openSettings, settingsData }) => (
   <aside className="w-64 bg-[#F5F0E6] flex flex-col h-full border-r border-[#D7BA9D]/30 transition-all flex-shrink-0 no-print">
     <div className="p-8 flex flex-col items-center text-center">
-      <div className="w-14 h-14 bg-[#B3543D] rounded-full flex items-center justify-center text-white mb-4 shadow-lg shadow-[#B3543D]/20"><Leaf size={28} /></div>
-      <h1 className="text-xl font-extrabold text-[#433D3C] tracking-tight">eats and use</h1>
+      <div className="w-14 h-14 bg-[#B3543D] rounded-full flex items-center justify-center text-white mb-4 shadow-lg shadow-[#B3543D]/20 overflow-hidden relative">
+          {settingsData?.logo ? (
+              <img src={settingsData.logo} alt="Logo" className="w-full h-full object-cover" />
+          ) : (
+              <Leaf size={28} />
+          )}
+      </div>
+      <h1 className="text-xl font-extrabold text-[#433D3C] tracking-tight">{settingsData?.shopName || 'eats and use'}</h1>
       <p className="text-[11px] text-[#8B8A73] uppercase tracking-[0.2em] font-bold mt-1">Pro Analytics</p>
     </div>
     <nav className="flex-1 px-4 space-y-2 overflow-y-auto custom-scrollbar">
@@ -277,11 +291,12 @@ const Sidebar = ({ currentView, setView, isDevMode, handleToggleMode, currentApp
         <div className="flex flex-col text-left"><span className="text-[10px] opacity-70 uppercase tracking-wider">Mode</span><span className="text-[11px]">{isDevMode ? 'DEV-TEST' : 'PRODUCTION'}</span></div>
         {isDevMode ? <ToggleLeft size={24}/> : <ToggleRight size={24}/>}
       </button>
-      <div className="bg-[#E8E1D5] rounded-2xl p-3 border border-[#D7BA9D]/30">
-         <div className="flex items-center justify-center gap-2 text-[#433D3C] font-bold text-[11px]">
+      <div className="bg-[#E8E1D5] rounded-2xl p-3 border border-[#D7BA9D]/30 flex justify-between items-center">
+         <div className="flex items-center gap-2 text-[#433D3C] font-bold text-[11px]">
             <CloudCog size={14} className="text-[#B3543D]"/>
-            <span className="font-mono">ID: {currentAppId ? currentAppId.slice(0,12) : '...'}</span>
+            <span className="font-mono">ID: {currentAppId ? currentAppId.slice(0,8) : '...'}</span>
          </div>
+         <button onClick={openSettings} className="p-1.5 hover:bg-white/50 rounded-lg text-[#8B8A73] transition-colors"><Settings size={16}/></button>
       </div>
     </div>
   </aside>
@@ -358,6 +373,22 @@ const App = () => {
 
   const [isDevMode, setIsDevMode] = useState(() => localStorage.getItem('isDevMode') === 'true');
   const appId = isDevMode ? 'dev-test' : 'eats-and-use-2026';
+
+  // Settings State
+  const [settings, setSettings] = useState({
+      shopName: 'EATS AND USE PRO',
+      shopNameTh: 'บริษัท อีทส์ แอนด์ ยูส โปร จำกัด',
+      address: '123 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110',
+      taxId: '010555XXXXXXX',
+      branch: 'สำนักงานใหญ่',
+      phone: '02-XXX-XXXX',
+      logo: null,
+      signature: null
+  });
+  const [isSettingsModalOpen, setSettingsModalOpen] = useState(false);
+  const logoInputRef = useRef(null);
+  const signatureInputRef = useRef(null);
+
 
   const handleToggleMode = () => {
     const newMode = !isDevMode;
@@ -461,7 +492,7 @@ const App = () => {
         priceAfterDiscount, 
         beforeVat, 
         vat, 
-        totalWithVat,
+        totalWithVat, 
         shipping, 
         grandTotal, 
         coupon, 
@@ -821,6 +852,46 @@ const App = () => {
     } catch (e) { console.error(e); }
   };
 
+  // --- Settings Handlers ---
+  const handleSettingsLogoChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 1048576) { 
+          alert("ไฟล์รูปภาพต้องมีขนาดไม่เกิน 1MB");
+          return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSettings(prev => ({ ...prev, logo: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSettingsSignatureChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 1048576) { 
+          alert("ไฟล์รูปภาพต้องมีขนาดไม่เกิน 1MB");
+          return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setSettings(prev => ({ ...prev, signature: reader.result }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    try {
+       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'general'), settings);
+       setSettingsModalOpen(false);
+       alert("บันทึกการตั้งค่าเรียบร้อย");
+    } catch(err) { console.error(err); }
+  };
+
   // --- Auth & Initial Sync ---
   useEffect(() => {
     const initAuth = async () => {
@@ -845,7 +916,15 @@ const App = () => {
     const uL = onSnapshot(p('lots'), s => setLots(s.docs.map(d => ({ ...d.data(), id: d.id }))));
     const uC = onSnapshot(p('contacts'), s => setContacts(s.docs.map(d => ({ ...d.data(), id: d.id }))));
     const uT = onSnapshot(query(p('transactions'), orderBy('date', 'desc'), limit(200)), s => setTransactions(s.docs.map(d => ({ ...d.data(), id: d.id }))));
-    return () => { uP(); uL(); uC(); uT(); };
+    
+    // Fetch Settings
+    const uS = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'general'), (docSnap) => {
+        if (docSnap.exists()) {
+            setSettings(prev => ({ ...prev, ...docSnap.data() }));
+        }
+    });
+
+    return () => { uP(); uL(); uC(); uT(); uS(); };
   }, [user, appId]);
 
   if (loading && user) return <div className="h-screen w-full flex items-center justify-center bg-[#FDFCF8]"><Loader2 className="animate-spin text-[#B3543D]" size={40}/></div>;
@@ -853,7 +932,15 @@ const App = () => {
   return (
     <div className="flex h-screen h-[100dvh] w-full text-[#433D3C] overflow-hidden bg-[#FDFCF8]">
       <GlobalStyles />
-      <Sidebar currentView={view} setView={setView} isDevMode={isDevMode} handleToggleMode={handleToggleMode} currentAppId={appId} />
+      <Sidebar 
+        currentView={view} 
+        setView={setView} 
+        isDevMode={isDevMode} 
+        handleToggleMode={handleToggleMode} 
+        currentAppId={appId} 
+        openSettings={() => setSettingsModalOpen(true)}
+        settingsData={settings}
+      />
 
       <main className="flex-1 flex flex-col min-w-0 bg-[#FDFCF8]">
         <header className="h-20 bg-white/50 backdrop-blur-md border-b border-[#D7BA9D]/20 flex items-center justify-between px-10 shrink-0 no-print">
@@ -1436,12 +1523,92 @@ const App = () => {
       </main>
 
       {/* --- Modals --- */}
+      
+      {/* Modal: Settings */}
+      <Modal isOpen={isSettingsModalOpen} onClose={() => setSettingsModalOpen(false)} title="ตั้งค่าร้านค้า (Store Settings)" maxWidth="max-w-2xl">
+          <form onSubmit={handleSaveSettings} className="space-y-6 text-left">
+              <div className="flex gap-6">
+                 {/* Logo Upload */}
+                 <div className="w-1/3 flex flex-col items-center gap-3">
+                     <div 
+                        className="w-32 h-32 rounded-full border-2 border-dashed border-[#D7BA9D] flex items-center justify-center overflow-hidden cursor-pointer hover:bg-[#F5F0E6] transition-all relative group"
+                        onClick={() => logoInputRef.current?.click()}
+                     >
+                        {settings.logo ? (
+                            <img src={settings.logo} alt="Shop Logo" className="w-full h-full object-cover" />
+                        ) : (
+                            <div className="text-center text-[#8B8A73]">
+                                <UploadCloud size={32} className="mx-auto mb-1"/>
+                                <span className="text-xs font-bold">Upload Logo</span>
+                            </div>
+                        )}
+                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-white font-bold text-xs">
+                             เปลี่ยนรูป
+                        </div>
+                     </div>
+                     <input type="file" ref={logoInputRef} className="hidden" accept="image/*" onChange={handleSettingsLogoChange} />
+                     <p className="text-[10px] text-[#8B8A73] text-center">แนะนำขนาด 1:1 (PNG/JPG)</p>
+                 </div>
+
+                 {/* General Info */}
+                 <div className="w-2/3 space-y-4">
+                     <div className="space-y-1">
+                         <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ชื่อร้าน (English)</label>
+                         <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={settings.shopName} onChange={e => setSettings({...settings, shopName: e.target.value})} />
+                     </div>
+                     <div className="space-y-1">
+                         <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ชื่อนิติบุคคล/ร้าน (ไทย)</label>
+                         <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={settings.shopNameTh} onChange={e => setSettings({...settings, shopNameTh: e.target.value})} />
+                     </div>
+                 </div>
+              </div>
+
+              <div className="space-y-4 pt-4 border-t border-[#F5F0E6]">
+                  <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">เลขผู้เสียภาษี</label>
+                          <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none font-mono" value={settings.taxId} onChange={e => setSettings({...settings, taxId: e.target.value})} />
+                      </div>
+                      <div className="space-y-1">
+                          <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">สาขา</label>
+                          <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={settings.branch} onChange={e => setSettings({...settings, branch: e.target.value})} />
+                      </div>
+                  </div>
+                  <div className="space-y-1">
+                       <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">ที่อยู่</label>
+                       <textarea className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-medium outline-none h-20" value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} />
+                  </div>
+                  <div className="space-y-1">
+                       <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1">เบอร์โทรศัพท์</label>
+                       <input type="text" className="w-full bg-[#FDFCF8] border border-[#D7BA9D]/30 rounded-xl px-4 py-2.5 text-sm font-bold outline-none" value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} />
+                  </div>
+              </div>
+
+              <div className="pt-4 border-t border-[#F5F0E6]">
+                  <label className="text-[10px] font-black text-[#8B8A73] uppercase tracking-widest px-1 mb-2 block">ลายเซ็นผู้อนุมัติ (Signature)</label>
+                  <div 
+                      className="w-full h-24 border-2 border-dashed border-[#D7BA9D] rounded-xl flex items-center justify-center cursor-pointer hover:bg-[#F5F0E6] transition-all relative group overflow-hidden"
+                      onClick={() => signatureInputRef.current?.click()}
+                  >
+                      {settings.signature ? (
+                          <img src={settings.signature} alt="Signature" className="h-full object-contain" />
+                      ) : (
+                          <span className="text-xs text-[#8B8A73] font-bold">คลิกเพื่ออัปโหลดลายเซ็น</span>
+                      )}
+                      <input type="file" ref={signatureInputRef} className="hidden" accept="image/*" onChange={handleSettingsSignatureChange} />
+                  </div>
+              </div>
+
+              <div className="pt-4">
+                  <button type="submit" className="w-full bg-[#433D3C] text-white py-4 rounded-xl text-lg font-black shadow-xl hover:bg-[#2A2A2A] transition-all">บันทึกการตั้งค่า</button>
+              </div>
+          </form>
+      </Modal>
 
       {/* Modal: Full Tax Invoice View (ใบกำกับภาษีเต็มรูป) */}
       <Modal isOpen={isFullInvoicePreviewOpen} onClose={() => setFullInvoicePreviewOpen(false)} title="ใบกำกับภาษีเต็มรูป (Full Tax Invoice)" maxWidth="max-w-3xl">
           {selectedInvoice && (
               <div className="bg-white p-8 text-[#333] font-mono-receipt border border-gray-200 shadow-lg relative min-h-[800px] flex flex-col justify-between invoice-preview-container">
-                  {/* ... existing full tax invoice code ... */}
                   {/* Header / Actions */}
                   <div className="absolute top-4 right-4 no-print flex gap-2 z-10">
                       <button 
@@ -1465,13 +1632,15 @@ const App = () => {
                            {/* Company Info */}
                            <div className="w-[60%] space-y-1 text-left">
                               <div className="flex items-center gap-3 mb-2">
-                                  <div className="w-10 h-10 bg-[#B3543D] rounded-full flex items-center justify-center text-white"><Leaf size={20} /></div>
-                                  <h4 className="text-xl font-bold text-[#B3543D]">บริษัท อีทส์ แอนด์ ยูส โปร จำกัด</h4>
+                                  <div className="w-10 h-10 bg-[#B3543D] rounded-full flex items-center justify-center text-white overflow-hidden">
+                                    {settings.logo ? <img src={settings.logo} className="w-full h-full object-cover"/> : <Leaf size={20} />}
+                                  </div>
+                                  <h4 className="text-xl font-bold text-[#B3543D]">{settings.shopNameTh || 'บริษัท อีทส์ แอนด์ ยูส โปร จำกัด'}</h4>
                               </div>
-                              <p className="text-sm font-bold">EATS AND USE PRO CO., LTD.</p>
-                              <p className="text-xs">123 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพมหานคร 10110</p>
-                              <p className="text-xs">เลขประจำตัวผู้เสียภาษี: 010555XXXXXXX (สำนักงานใหญ่)</p>
-                              <p className="text-xs">โทร: 02-XXX-XXXX</p>
+                              <p className="text-sm font-bold">{settings.shopName || 'EATS AND USE PRO CO., LTD.'}</p>
+                              <p className="text-xs">{settings.address}</p>
+                              <p className="text-xs">เลขประจำตัวผู้เสียภาษี: {settings.taxId} ({settings.branch})</p>
+                              <p className="text-xs">โทร: {settings.phone}</p>
                            </div>
 
                            {/* Document Meta */}
@@ -1601,7 +1770,9 @@ const App = () => {
                               <p className="text-[10px] mt-1">วันที่ ____/____/____</p>
                           </div>
                           <div className="text-center w-48">
-                              <div className="border-b border-gray-400 border-dashed h-8"></div>
+                              <div className="border-b border-gray-400 border-dashed h-8 flex items-end justify-center pb-1">
+                                {settings.signature && <img src={settings.signature} alt="Sig" className="max-h-16 max-w-full" />}
+                              </div>
                               <p className="text-xs mt-2">ผู้รับเงิน / ผู้ออกใบกำกับภาษี</p>
                               <p className="text-[10px] text-gray-400">Cashier / Authorized Signature</p>
                               <p className="text-[10px] mt-1">วันที่ {safeDate(selectedInvoice.date)}</p>
@@ -1702,12 +1873,14 @@ const App = () => {
       {/* Modal: Simplified Receipt View */}
       <Modal isOpen={isReceiptModalOpen} onClose={() => setReceiptModalOpen(false)} title="ใบกำกับภาษีอย่างย่อ (Simplified Invoice)" maxWidth="max-w-sm">
         {lastTransaction && (
-          <div className="flex flex-col items-center font-mono-receipt text-[#433D3C]">
+          <div className="flex flex-col items-center font-mono-receipt text-[#433D3C] invoice-preview-container">
              <div className="text-center mb-6 space-y-1">
-                <div className="w-10 h-10 bg-[#B3543D] rounded-full flex items-center justify-center text-white mx-auto mb-2"><Leaf size={20} /></div>
-                <h4 className="text-[15px] font-bold uppercase">eats and use Pro</h4>
-                <p className="text-[10px] opacity-60">เลขประจำตัวผู้เสียภาษี: 010-XXXX-XXXXX</p>
-                <p className="text-[10px] opacity-60">สำนักงานใหญ่: 00000</p>
+                <div className="w-10 h-10 bg-[#B3543D] rounded-full flex items-center justify-center text-white mx-auto mb-2 overflow-hidden">
+                    {settings.logo ? <img src={settings.logo} className="w-full h-full object-cover"/> : <Leaf size={20} />}
+                </div>
+                <h4 className="text-[15px] font-bold uppercase">{settings.shopName || 'eats and use Pro'}</h4>
+                <p className="text-[10px] opacity-60">เลขประจำตัวผู้เสียภาษี: {settings.taxId || '010-XXXX-XXXXX'}</p>
+                <p className="text-[10px] opacity-60">{settings.branch || 'สำนักงานใหญ่'}</p>
              </div>
              
              <div className="w-full border-y border-dashed border-[#D7BA9D] py-4 my-2 text-[11px] space-y-1">
@@ -1906,49 +2079,17 @@ const App = () => {
                 </table>
              </div>
           </div>
-          <div className="pt-6 border-t border-[#F5F0E6] space-y-3">
-             {/* Discount Row */}
-             <div className="flex justify-between items-center">
-                 <span className="text-sm font-bold text-[#8B8A73]">ส่วนลด (Discount):</span>
-                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-3 py-1.5 rounded-xl border border-[#D7BA9D]/30">
+          <div className="pt-6 border-t border-[#F5F0E6] flex justify-between items-center">
+             <div className="flex items-center gap-4">
+                 <span className="text-sm font-bold text-[#8B8A73] uppercase tracking-wider">Discount:</span>
+                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-4 py-2 rounded-xl border border-[#D7BA9D]/30 no-print">
                     <span className="text-xs font-black text-[#D7BA9D]">฿</span>
-                    <input type="number" className="w-24 outline-none text-right text-sm font-bold bg-transparent text-red-500" value={newStock.discount} onChange={e => setNewStock({...newStock, discount: e.target.value})} />
+                    <input type="number" className="w-24 outline-none text-right text-[16px] text-red-500 font-extrabold bg-transparent" value={newStock.discount} onChange={e => setNewStock({...newStock, discount: e.target.value})} />
                  </div>
              </div>
-
-             {/* Voucher Row */}
-             <div className="flex justify-between items-center">
-                 <span className="text-sm font-bold text-[#8B8A73]">คูปองเงินสด (Voucher):</span>
-                 <div className="flex items-center gap-2 bg-[#FDFCF8] px-3 py-1.5 rounded-xl border border-[#D7BA9D]/30">
-                    <span className="text-xs font-black text-[#D7BA9D]">฿</span>
-                    <input type="number" className="w-24 outline-none text-right text-sm font-bold bg-transparent text-blue-500" value={newStock.voucher} onChange={e => setNewStock({...newStock, voucher: e.target.value})} />
-                 </div>
-             </div>
-
-             {/* Summary */}
-             <div className="flex justify-between items-end border-t border-dashed border-[#D7BA9D]/50 pt-3">
-                <div className="text-right w-full space-y-1">
-                    <div className="flex justify-between text-xs text-[#8B8A73]">
-                        <span>ยอดรวมสินค้า (Subtotal)</span>
-                        <span>{newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-[#8B8A73]">
-                        <span>หักส่วนลดการค้า</span>
-                        <span className="text-red-500">-{Number(newStock.discount || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-bold text-[#433D3C]">
-                        <span>ยอดสุทธิ (Net Total)</span>
-                        <span>{(newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) - Number(newStock.discount || 0)).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-[#8B8A73]">
-                        <span>ชำระด้วยคูปอง</span>
-                        <span className="text-blue-500">-{Number(newStock.voucher || 0).toLocaleString()}</span>
-                    </div>
-                    <div className="flex justify-between text-lg font-black text-[#B3543D] pt-1">
-                        <span>ยอดชำระจริง (Cash Pay)</span>
-                        <span>{Math.max(0, (newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) || 0) - Number(newStock.discount || 0) - Number(newStock.voucher || 0)).toLocaleString()}</span>
-                    </div>
-                </div>
+             <div className="text-right">
+                <p className="text-[11px] font-black text-[#8B8A73] uppercase tracking-widest mb-1">Grand Total</p>
+                <p className="text-3xl font-black text-[#B3543D]">฿{Math.max(0, (newStock.items?.reduce((s, i) => s + (i.cost * i.qty), 0) || 0) - Number(newStock.discount || 0)).toLocaleString()}</p>
              </div>
           </div>
           <button onClick={handleReceiveStock} className="w-full bg-[#433D3C] text-white py-5 rounded-[24px] text-lg font-black shadow-xl hover:bg-[#2A2A2A] transition-all no-print mt-6">บันทึกรับสินค้า</button>
